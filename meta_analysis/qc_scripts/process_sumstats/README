@@ -1,0 +1,100 @@
+################################################################################
+
+# Scripts in this directory were used to clean up the raw summary stats and make
+# it more consistent in terms of required header, chromosome names, etc.
+
+# Once the summary stats were cleaned up to a certain degree, each summary stats
+# went through the general QC pipeline for each ancestry.
+
+# These scripts were essentially just for "pre-QC" (prepping summary stats for
+# proper QC).
+
+################################################################################
+
+# The pre-QC procedure for each raw summary stats are as follows:
+
+# KP data:
+# - Add sample size to each sex/ancestry combinations
+
+bash process_kp.sh
+
+# 23andMe data:
+# - clean up some of the original columns
+# - calculate MAF using dosage info
+#
+# NOTE: FILENAME is in the form of "{ancestry}_{cohort}_over17_gout_noNA.dat",
+# where ancestry is one of "african_american", "east_asian", "europe", or
+# "latino", and cohort is one of "" (blank; for 'full', or combined sex,
+# analysis), "male", or "female"
+
+bash 23andMe_clean_data.sh FILENAME
+
+# Japanese data:
+# - calculate and add MAF information to the summary stats
+# - make the chromosome notation consistent (X into 23)
+
+Rscript add_maf_jap.R
+
+sed 's/X/23/g' data/summary/EAS/jap_illumina_maf.tsv > data/summary/EAS/tmp && mv data/summary/EAS/tmp data/summary/EAS/jap_illumina_maf.tsv
+sed 's/X/23/g' data/summary/EAS/jap_japonica_maf.tsv > data/summary/EAS/tmp && mv data/summary/EAS/tmp data/summary/EAS/jap_japonica_maf.tsv
+
+# Chinese data:
+# - merge MAF info to the data (sent separately)
+# - merge chromosome X data with autosomal data (sent separately)
+# - format the male-only data so it can be used with other summary stats during
+#   QC and meta-analysis
+
+bash process_chn.sh
+
+# Korean data:
+# - clean up header
+# - filter relevant columns from the file
+# - make the chromosome notation consisteent (X into 23)
+# - log the OR
+
+bash clean_korean_data.sh FILENAME
+
+# UKBB data:
+# - pull out relevant columns
+# - filter for variants with HWE p > 1e-6 and INFO >= 0.3
+# - log the OR and convert log10P to P
+# NOTE: FILENAME refers to similar convention as with 23andMe, but only for
+# cohorts (full, male, or female)
+
+bash process_ukbb.sh FILENAME
+
+# SNPTEST (i.e. GlobalGout, NHS/HPFS, FAST/GenScotland, and Malmo) data:
+# - merge chromosome X information to the autosomal data
+# - clean up the MAF column from SNPTEST
+# - make the chromosome notation consisteent (X into 23)
+
+bash merge_X_snptest.sh FILENAME
+
+# GUGC data:
+# - make the chromosome notation consisteent (X into 23)
+# - upper case the alleles
+# - add MAF information
+
+bash process_gugc.sh data/summary/EUR/GUGC_MetaAnalysis_Results_Gout_snptracker.result
+
+# Partners data:
+# - add MAF information and sample size information
+# - add CHR/POS information
+
+bash process_partners.sh FILENAME
+
+# FinnGen data:
+# - make the chromosome notation consisteent (X into 23)
+
+bash process_finngen.sh FILENAME
+
+################################################################################
+
+# After the above has been done, the header of each files are made consistent
+# to be used in the "main" QC pipeline
+
+clean_header_AFR.sh
+clean_header_EAS.sh
+clean_header_EUR.sh
+clean_header_LAT.sh
+
