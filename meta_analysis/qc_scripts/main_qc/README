@@ -1,0 +1,96 @@
+################################################################################
+
+# Scripts in this directory were used to clean up the processed summary stats
+# before running the meta-analysis
+
+################################################################################
+
+# The general QC procedure for the summary stats are as follows:
+# - within study, identify and/or remove bad or extreme variants
+# - identify and deal with duplicate variants, both within and across studies
+# - across studies, check for inconsistent alleles and make the effect allele
+#   consistent
+
+################################################################################
+
+# Run per-study QC (in parallel or on its own):
+#
+# ANC = ancestry (AFR/EUR/EAS/LAT) - where the summary stats are located
+# FILE = the filename of the summary stats
+Rscript parallel_per_study_qc.R data/summary/ANC/FILE.out
+
+# The above script will:
+# - Round sample size to closest integer, generate CHR:POS ID, add "allelic
+#   value" and generate MAC column
+# - Check for "bad" SNPs and remove them. These include:
+#    - non-ACGT alleles
+#    - NA or Inf effect size
+#    - NA, negative, or Inf SE value
+#    - negative MAF or MAF >= 1
+#    - SNPs that have sample size less than 0.05 of total sample size for that study
+# - Check for SNPs with "extreme" values (but don't remove them):
+#    - P-value = 0
+#    - absolute effect size > 10
+#    - MAF < 0.1%
+#    - MAC < 1% of total sample used for that variant
+
+# NOTE: "Allelic value" is a number based on the two alleles (alt and ref) of
+# a variant. The "A" allele is given the value of 1, "C" = 2, "G" = 3, and "T"
+# = 5, and anything else (such as indel or copy number variation) are given
+# some non-sense value like 99. The sum of these two values will be unique and
+# will range from 3 to 8, which will allow you to compare variants across
+# studies and check whether certain study has the same pair of alleles for that
+# particular variant. After making sure the alleles are the same, then you only
+# need to check whether the ref or alt allele is the same between the studies
+# to determine if the summary stats need to be flipped to keep the effect
+# allele consistent across studies.
+# Other uses for the allelic value is to determine which allele pair to
+# reject/keep for each study, if there are mixture of pairs of alleles in
+# multiple studies (e.g. if 2 studies have A/G and 3 studies have A/T). We
+# decided to keep the most commonly occuring allele pair (in the above example,
+# the A/T pair).
+
+################################################################################
+
+# "Fix" duplicates:
+#
+# Input files are all of the QCed summary statistics from
+# parallel_per_study_qc.R (above).
+#
+# General purpose of this script is to identify duplicates in each of the input
+# summary stats and compare these duplicate variants across studies to make
+# sure the "correct" variant is kept for the meta-analysis.
+# For example, one study can have duplicated variants, of which one of them
+# could be present in all the other studies. In this case, the duplicated
+# variant that is not in the other studies should be removed over the one that
+# is.
+#
+# ANC = ancestry (AFR/EUR/EAS/LAT) - where the summary stats are located
+# SEX = full, male, or female
+Rscript fix_dup.R data/summary/ANC/*_SEX_clean_qc.tsv
+
+# The above script will:
+# - remove "easy" duplicates from each study (exact same chr/pos, alleles,
+#   summary stats, etc.)
+# - for each study, identify variants with duplicated chr/pos with different
+#   alleles
+# - from all the variants with duplicated chr/pos, figure out which variant
+#   should be kept based on how common they are
+
+################################################################################
+
+# Across study QC:
+#
+# ANC = ancestry (AFR/EUR/EAS/LAT) - where the summary stats are located
+# SEX = full, male, or female
+Rscript across_study_qc.R data/summary/ANC/*_SEX_clean_qc_nodup.tsv
+
+# The above script will:
+# - based on a "reference" summary data (usually the largest sample size and
+#   with largest number of variants), define/determine variants to keep and
+#   discard those that have different alleles compared to the reference data
+#   set
+# - check and "flip" the alleles if the variant has an unusually different MAF
+#   between the studies
+# - remove extreme variants (MAF < 0.01% and absolute effect size > 10)
+
