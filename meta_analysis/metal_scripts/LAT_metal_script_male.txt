@@ -1,0 +1,67 @@
+# METAL script for EAS meta-analysis
+
+COLUMNCOUNTING STRICT # make sure all rows have the same number of columns
+SCHEME STDERR # use an inverse-variance weighted meta-analysis
+AVERAGEFREQ ON
+MINMAXFREQ ON
+
+# === DEFINE CUSTOM VARIABLES ===
+CUSTOMVARIABLE TotalSampleSize
+
+# === DESCRIBE AND PROCESS THE INPUT FILE ===
+MARKER cpid
+ALLELE minor major
+EFFECT effect
+PVALUE P
+WEIGHT N
+STDERR SE
+FREQLABEL MAF
+LABEL TotalSampleSize as N
+
+# === LOAD FILES ===
+PROCESS data/summary/LAT/23andMe_lat_male_clean_qc_nodup_final.txt
+PROCESS data/summary/LAT/KP_LAT_male_clean_qc_nodup_final.txt
+
+# === ANALYSE AND OUTPUT ===
+OUTFILE results/meta_results/LAT/male/LAT_meta_male .tbl
+ANALYZE HETEROGENEITY # includes het-P, Q, and I2 in output file
+
+CLEAR
+
+# === Repeat for case MAF ===
+MARKER cpid
+ALLELE minor major
+EFFECT effect
+PVALUE P
+WEIGHT N
+STDERR SE
+FREQLABEL MAF_case
+
+# === LOAD FILES ===
+PROCESS data/summary/LAT/23andMe_lat_male_clean_qc_nodup_final.txt
+PROCESS data/summary/LAT/KP_LAT_male_clean_qc_nodup_final.txt
+
+# === ANALYSE AND OUTPUT ===
+OUTFILE results/meta_results/LAT/male/LAT_meta_male_cases .tbl
+ANALYZE
+
+CLEAR
+
+# === Repeat for control MAF ===
+MARKER cpid
+ALLELE minor major
+EFFECT effect
+PVALUE P
+WEIGHT N
+STDERR SE
+FREQLABEL MAF_control
+
+# === LOAD FILES ===
+PROCESS data/summary/LAT/23andMe_lat_male_clean_qc_nodup_final.txt
+PROCESS data/summary/LAT/KP_LAT_male_clean_qc_nodup_final.txt
+
+# === ANALYSE AND OUTPUT ===
+OUTFILE results/meta_results/LAT/male/LAT_meta_male_controls .tbl
+ANALYZE
+
+QUIT

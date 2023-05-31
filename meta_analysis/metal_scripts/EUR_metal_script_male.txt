@@ -1,0 +1,88 @@
+# METAL script for EUR meta-analysis
+
+COLUMNCOUNTING STRICT # make sure all rows have the same number of columns
+SCHEME STDERR # use an inverse-variance weighted meta-analysis
+AVERAGEFREQ ON
+MINMAXFREQ ON
+
+# === DEFINE CUSTOM VARIABLES ===
+CUSTOMVARIABLE TotalSampleSize
+
+# === DESCRIBE AND PROCESS THE INPUT FILE ===
+MARKER cpid
+ALLELE minor major
+EFFECT effect
+PVALUE P
+WEIGHT N
+STDERR SE
+FREQLABEL MAF
+LABEL TotalSampleSize as N
+
+# === LOAD FILES ===
+PROCESS data/summary/EUR/23andMe_eur_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/ukbb_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/choi_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/eurogout_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/fast_gs_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/malmo_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/KP_EUR_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/Partners_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/GUGC_male_clean_qc_nodup_final.txt
+
+# === ANALYSE AND OUTPUT ===
+OUTFILE results/meta_results/EUR/male/EUR_meta_male .tbl
+ANALYZE HETEROGENEITY # includes het-P, Q, and I2 in output file
+
+CLEAR
+
+# === Repeat for case MAF ===
+MARKER cpid
+ALLELE minor major
+EFFECT effect
+PVALUE P
+WEIGHT N
+STDERR SE
+FREQLABEL MAF_case
+
+# === LOAD FILES ===
+PROCESS data/summary/EUR/23andMe_eur_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/ukbb_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/choi_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/eurogout_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/fast_gs_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/malmo_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/KP_EUR_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/Partners_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/GUGC_male_clean_qc_nodup_final.txt
+
+# === ANALYSE AND OUTPUT ===
+OUTFILE results/meta_results/EUR/male/EUR_meta_male_cases .tbl
+ANALYZE
+
+CLEAR
+
+# === Repeat for control MAF ===
+MARKER cpid
+ALLELE minor major
+EFFECT effect
+PVALUE P
+WEIGHT N
+STDERR SE
+FREQLABEL MAF_control
+
+# === LOAD FILES ===
+PROCESS data/summary/EUR/23andMe_eur_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/ukbb_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/choi_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/eurogout_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/fast_gs_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/malmo_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/KP_EUR_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/Partners_male_clean_qc_nodup_final.txt
+PROCESS data/summary/EUR/GUGC_male_clean_qc_nodup_final.txt
+
+# === ANALYSE AND OUTPUT ===
+OUTFILE results/meta_results/EUR/male/EUR_meta_male_controls .tbl
+ANALYZE
+
+QUIT

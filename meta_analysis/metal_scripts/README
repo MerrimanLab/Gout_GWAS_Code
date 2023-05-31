@@ -1,0 +1,38 @@
+################################################################################
+
+# Scripts in this directory are involved in running single-ancestry
+# meta-analyses and cleaning the results afterwards
+
+################################################################################
+
+# Run single-ancestry meta-analysis:
+#
+# ANC = ancestry (AFR/EUR/EAS/LAT) - where the summary stats are located
+# SEX = full, male, or female
+metal ANC_metal_script_SEX.txt > results/meta_results/ANC/SEX/ANC_meta_SEX.log
+
+# Self-explanatory - runs METAL using the METAL script that it specifies
+
+################################################################################
+
+# Clean up single-ancestry meta-analysis results:
+#
+# ANC = ancestry (AFR/EUR/EAS/LAT) - where the summary stats are located
+# SEX = full, male, or female
+bash clean_metal.sh results/meta_results/ANC/SEX/ANC_meta_SEX1.tbl
+
+# Above script will:
+# - make extra columns for CHR and POS
+# - uppercase the alleles
+# - remove markers with significant HetISq
+# - generate a copy of the results with only the columns required for TAMA (ID,
+#   chr, pos, MAF, beta, se, alleles, sample size).
+# - reorder the summary stats based on chr/pos
+
+# Since some meta-analysis results will have P-value beyond R's precision
+# limit, read in the p-value as a string and convert it into log10P value:
+Rscript logP_conversion.R results/meta_results/ANC/SEX/ANC_meta_SEX1_clean.tsv
+
+# Generate manhattan and QQ plots using the logP-converted data:
+Rscript metal_manh_qq_logp.R results/meta_results/ANC/SEX/ANC_meta_SEX1_clean.tsv.logP
+
