@@ -1,0 +1,61 @@
+################################################################################
+
+# Scripts in this directory are involved in preparing the single-ancestry
+# meta-analysis results for trans-ancestry meta-analysis and cleaning up the
+# TAMA output
+
+################################################################################
+
+# Prepare the single-ancestry meta-analysis results for trans-ancestry
+# meta-analysis with MANTRA:
+#
+# ??? = bash wildcard to match all of AFR/EAS/EUR/LAT directories
+# SEX = full, male, or female
+
+Rscript pre_tama_merge.R results/meta_results/???/SEX/*meta_SEX1_pretama.tsv
+
+# Above script will:
+# - merge the single-ancestry meta-analysis results so that it's ready for TAMA
+#   using MANTRA
+# - align the effect alleles so it's consistent across ancestries
+
+# MANTRA requires the input files to be in a specific way, so arrange the
+# output from above script so it can be used for MANTRA:
+bash pre_tama_arrange.sh data/tama_dat/SEX/SEX_merged_dat.tsv
+
+# This script generates the "distance" between the ancestries (using the
+# `dmatcal` script from MANTRA) and tar the input files for running MANTRA on
+# HPC platform
+bash prep_tama.sh SEX
+
+# This script/note contains the general procedure of running MANTRA using the
+# data created from the above scripts.
+#
+# The general steps are:
+# - split the files into smaller chunks (~5000 SNPs)
+# - run MANTRA in parallel, using the chunked files and other input files (e.g.
+#   info from `dmatcal`)
+# - merge the chunked results together at the end
+full_tama.sh
+
+################################################################################
+
+# Calculate N, merge and clean TAMA results, and plot
+
+# Very simple awk to generate the N used for each variant (MANTRA can only
+# output sample size less than 6 digits long, so need to manually calculate it)
+awk -f calc_tama_n.awk data/tama_dat/SEX/SEX_merged_dat.tsv > results/tama_results/SEX/tama_sample_size.txt
+
+# Clean up the MANTRA output:
+#
+# This script will:
+# - add correct sample size for the variants that had more than 6 digits
+# - Add header to the TAMA results
+# - keep only the variants that had information from all four ancestries
+# - get rsID using SNPtracker and add it to the summary stats
+# - merge all of the info together (TAMA results, per-ancestry beta, and rsID)
+bash clean_tama_results.sh results/tama_results/SEX/comb.out
+
+# Rename the cleaned results to "tama_SEX_clean.out"
+rename comb tama_SEX results/tama_results/SEX/comb*
+
