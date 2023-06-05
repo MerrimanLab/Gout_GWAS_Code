@@ -59,3 +59,17 @@ bash clean_tama_results.sh results/tama_results/SEX/comb.out
 # Rename the cleaned results to "tama_SEX_clean.out"
 rename comb tama_SEX results/tama_results/SEX/comb*
 
+# Filter out variants that didn't pass the N threshold in the single-ancestry
+# GWAS:
+#
+# Note that a variant could still be present in all 4 ancestries when TAMA is
+# run, since N-filtering was done after the meta-analyses (hence the filtering
+# is done separately now)
+
+# Combine all of the variants that passed in each ancestry and pull out those
+# that were present in all 4 ancestries (i.e. those that passed the N-filter in
+# all 4 ancestries):
+cat results/meta_results/*/SEX/*.npass.list | sort | uniq -c | sed 's/^ //g' | grep '^4' > results/tama_results/SEX/tama_SEX_clean.npass.list
+
+bash nfilter_tama.sh results/tama_results/SEX/tama_SEX_clean.out
+

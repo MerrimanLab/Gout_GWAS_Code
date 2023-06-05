@@ -29,10 +29,18 @@ bash clean_metal.sh results/meta_results/ANC/SEX/ANC_meta_SEX1.tbl
 #   chr, pos, MAF, beta, se, alleles, sample size).
 # - reorder the summary stats based on chr/pos
 
-# Since some meta-analysis results will have P-value beyond R's precision
-# limit, read in the p-value as a string and convert it into log10P value:
-Rscript logP_conversion.R results/meta_results/ANC/SEX/ANC_meta_SEX1_clean.tsv
+# rsID for the variants were added using SNPtracker
+bash snptrack.sh results/meta_results/ANC/SEX/ANC_meta_SEX1_clean.tsv
+Rscript merge_rsID.R results/meta_results/ANC/SEX/ANC_meta_SEX1_clean.tsv results/meta_results/ANC/SEX/ANC_meta_SEX1_clean.result.txt
 
-# Generate manhattan and QQ plots using the logP-converted data:
-Rscript metal_manh_qq_logp.R results/meta_results/ANC/SEX/ANC_meta_SEX1_clean.tsv.logP
+# Remove variants that didn't pass the study size and/or sample size threshold:
+bash nfilter.sh results/meta_results/ANC/SEX/ANC_meta_SEX1_clean_rsid.txt
+
+# For the N-filter threshold, if there were more than 3 studies involved in the
+# meta-analysis, then a variant was filtered out if it was not present in more
+# than half of the studies. However, variant that had N >= 0.2 * max(N) were
+# kept, even if it didn't pass the threshold for the the number of studies
+#
+# If there were <= 2 studies involved, only the variants with N >= 0.2 * max(N)
+# were kept.
 

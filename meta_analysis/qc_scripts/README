@@ -1,5 +1,5 @@
-This directory contains all the scripts involved in the per-cohort,
-across-cohort, and across-ancestry QC.
+This directory contains all the scripts involved in the per-cohort, and
+across-cohort QC.
 
 `process_sumstats/` directory contains all the scripts used to pre-clean all the summary stats
 before they can be QCed.
