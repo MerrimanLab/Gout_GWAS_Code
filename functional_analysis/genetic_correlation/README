@@ -1,0 +1,56 @@
+################################################################################
+
+# This directory contains all the main scripts used to run the genetic
+# correlation analysisof the European gout GWAS with Neale's UKBB GWAS summary
+# statistics using LD score regression
+
+################################################################################
+
+# Reference LD scores for this analysis uses the reference data provided by the
+# Price lab (baseline LD v1.1)
+
+# Download the Neale summary stats
+#
+# NOTE: the manifest file was downloaded from
+# https://docs.google.com/spreadsheets/d/1EmwlCYYqkoVKqAS71nNDKoN18PyKwysYUppKTSMvKiM/edit?usp=sharing
+bash genetic_correlation/download_sumstats.sh
+
+################################################################################
+# Munging the data and preparing the Neale summary stats
+#
+# NOTE: Our gout GWAS summary stats have already been munged in the LD score
+# regression analysis - see `ldsc_scripts/` directory
+
+# First map the Neale UKBB summary stats variant ID to rsID:
+genetic_correlation/sumstats_rsid_list.sh
+
+# Now make sure the downloaded Neale UKBB summary stats are in the correct
+# format for LD score regression genetic correlation
+#
+# NEALE = name of the Neale UKBB summary stats
+bash genetic_correlation/prep_sumstats.sh NEALE
+
+# Munge our UKBB urate summary stats
+bash genetic_correlation/munge_ukbb_urate.sh
+
+################################################################################
+
+# Script to run genetic correlation of one summary stats with one of Neale UKBB
+# summary stats
+#
+# SUMMARY = either our EUR (full/male/female) gout GWAS summary stats or UKBB urate summary stats
+# NEALE = summary stats file located in /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/rikutakei/GWAS_Functional/data/neale_ukbb/neale_ldsc_sumstats/
+#
+# NOTE: This script is run in parallel
+bash genetic_correlation/run_ldsc_rg.sh SUMMARY NEALE
+
+# Merge all the log files (i.e. the results) in the output directory into
+# a single file
+#
+# TRAIT = either GOUT or URATE, depending on what genetic correlation was run
+genetic_correlation/merge_rg_log.sh results/genetic_correlation/TRAIT/ TRAIT
+
+# Script to take a look at the difference/similarity of male-/female-specific
+# gout GWAS genetic correlation results
+genetic_correlation/compare_sex_specific_rg.R
+
