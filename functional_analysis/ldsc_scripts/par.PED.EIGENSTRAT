@@ -1,0 +1,8 @@
+genotypename:    /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/rikutakei/GWAS_Functional/data/ldsc/1kgp_plink/blah/blah_wgs_indep.ped
+snpname:         /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/rikutakei/GWAS_Functional/data/ldsc/1kgp_plink/blah/blah_wgs_indep.map
+indivname:       /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/rikutakei/GWAS_Functional/data/ldsc/1kgp_plink/blah/blah_wgs_indep.ped
+outputformat:    EIGENSTRAT
+genotypeoutname: /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/rikutakei/GWAS_Functional/data/ldsc/1kgp_pc/blah.eigenstratgeno
+snpoutname:      /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/rikutakei/GWAS_Functional/data/ldsc/1kgp_pc/blah.snp
+indivoutname:    /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/rikutakei/GWAS_Functional/data/ldsc/1kgp_pc/blah.ind
+familynames:     NO

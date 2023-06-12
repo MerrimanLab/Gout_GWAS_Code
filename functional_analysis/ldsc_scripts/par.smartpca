@@ -1,0 +1,10 @@
+genotypename:    /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/rikutakei/GWAS_Functional/data/ldsc/1kgp_pc/blah.eigenstratgeno
+snpname:         /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/rikutakei/GWAS_Functional/data/ldsc/1kgp_pc/blah.snp
+indivname:       /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/rikutakei/GWAS_Functional/data/ldsc/1kgp_pc/blah.ind
+evecoutname:     /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/rikutakei/GWAS_Functional/data/ldsc/1kgp_pc/blah_eigen.pca.evec
+evaloutname:     /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/rikutakei/GWAS_Functional/data/ldsc/1kgp_pc/blah_eigen.eval
+numoutevec:      10
+numoutlieriter:   0
+outliermode:      2
+familynames:     NO
+numthreads:      12

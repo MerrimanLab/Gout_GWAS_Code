@@ -1,0 +1,130 @@
+################################################################################
+
+# This directory contains all the main scripts used to run the basic LD score
+# regression analysis, and cell-type group (CTG) and cell-type specific (CTS)
+# enrichment analysis
+
+################################################################################
+
+# Need to generate a reference PC data to be used as a covariate for running
+# covariate-adjusted LD score regression.
+
+# First, generate independent list of variants in 1000 Genomes reference data
+# for each ancestry:
+# ANC = Ancestry (AFR, EAS, EUR, or LAT)
+bash ldsc_scripts/1kgp_indep.sh ANC
+
+# Use `convertf` script from EIGENSOFT version 6.1.4 to format the data for PC
+# calculation using `smartpca` script from EIGENSOFT:
+bash ldsc_scripts/run_convertf.sh ANC ${PWD}
+bash ldsc_scripts/run_smart_pca.sh ANC ${PWD}
+
+################################################################################
+# Make required files for making reference LD scores from 1000 Genomes project
+# data
+
+# Clean up the 1000 Genomes data a little bit and generate a frequency file:
+bash ldsc_scripts/1kgp_frq.sh ANC
+bash ldsc_scripts/1kgp_mac_hwe_filter.sh ANC
+
+# Generate baseline v1.1 LD score regression annotations:
+bash ldsc_scripts/make_annot_v1.1.sh ANC
+
+# Calculate LD score regression weights from 1000 Genomes reference panel:
+bash ldsc_scripts/make_ldsc_weights.sh ANC
+
+# Run LD score regression on the 1000 Genomes reference to generate reference
+# LD score:
+# CHR = chromosome number (1-22)
+cov-ldsc.py \
+	--bfile data/ldsc/1kgp_plink/ANC_chrCHR.mac5 \
+	--annot data/ldsc/1kgp_ref_ldsc/ANC/ANC_chrCHR.annot.gz \
+	--cov data/ldsc/1kgp_pc/ANC_eigen.pca.evec.clean \
+	--print-snps data/ldsc_ref_files/w_hm3_nomgc_snplits_plink.txt \
+	--l2 \
+	--ld-wind-cm 20 \
+	--out data/ldsc/1kgp_ref_ldsc/ANC/ANC_chrCHR
+
+################################################################################
+# Run LD score regression on the summary stats usig the reference LD scores
+# from above
+
+# Convert extremely low p-values to 0 before running `munge_sumstats.py`
+Rscript ldsc_scripts/conv_lowp.R $(@:%sumstats.gz=%txt)
+
+# Munge single-ancestry meta-analysis results for LD score regression using the
+# `munge_sumstats.py` script that comes with LDSC:
+# SEX = full, male, or female
+munge_sumstats.py \
+	--sumstats data/fema_data/ANC/ANC_meta_SEX1_clean_rsid.nfiltered.biallelic.lowp.txt \
+	--a1 minor \
+	--a2 major \
+	--p P \
+	--frq MAF \
+	--snp SNP \
+	--merge-alleles data/ldsc/ref_files/w_hm3.snplist \
+	--keep-maf \
+	--chunksize 500000 \
+	--ignore effect,SNP_original,MarkerName \
+	--n-min 1000 \
+	--out data/fema_data/ANC/ANC_meta_SEX1_clean_rsid.nfiltered.biallelic
+
+# Run LD score regression on the single-ancestry meta-analysis summary stats,
+# using the 1000 Genomes reference LD score
+cov-ldsc.py \
+	--h2 data/fema_data/ANC/ANC_meta_SEX1_clean_rsid.nfiltered.biallelic.sumstats.gz \
+	--ref-ld-chr data/ldsc/1kgp_ref_ldsc/ANC/ANC_chr \
+	--w-ld-chr data/ldsc/1kgp_ref_ldsc/ANC/ANC_weights_chr \
+	--overlap-annot \
+	--frqfile-chr data/ldsc/1kgp_plink/ANC/ANC_mac5_chr \
+	--out results/ldsc/baseline_v1.1/ANC/ANC_meta_SEX1_clean_rsid.nfiltered.biallelic.h2
+
+################################################################################
+# Run partitioned LD score regression for cell-type group (CTG) and cell-type
+# specific (CTS) analyses
+
+# Make annotation bim file for CTG and CTS analyses
+bash ldsc_scripts/make_ct_bim.sh
+
+# Make annotation files for CTG and CTS:
+# CTG = 1-10
+# CTS = 1-220
+# CHR = 1-22
+bash ldsc_scripts/make_ctg_annot.sh ANC_cts.CTG.CHR
+bash ldsc_scripts/make_cts_annot.sh ANC_cts.CTS.CHR
+
+# Generate reference CTG/CTS LD scores:
+bash ldsc_scripts/make_ref_ctg.sh ANC_ctg.CTG.CHR
+bash ldsc_scripts/make_ref_cts.sh ANC_ctg.CTS.CHR
+
+# Generate .ldcts files for CTG/CTS analyses (although it's only used for the
+# CTS analysis, since CTS has 220 cell types):
+bash ldsc_scripts/make_ctg_ldcts.sh
+bash ldsc_scripts/make_cts_ldcts.sh
+
+# Run CTG/CTS LD score regression for each ancestry:
+
+# CTG analysis:
+for i in {1..10}; do
+	cov-ldsc.py \
+		--h2 data/fema_data/ANC/ANC_meta_SEX1_clean_rsid.nfiltered.biallelic.sumstats.gz \
+		--ref-ld-chr data/ldsc/1kgp_ref_ctg/ANC/ctg/ANC_ctg.${i}.,data/ldsc/1kgp_ref_ldsc/ANC/ANC_chr \
+		--frqfile-chr data/ldsc/1kgp_plink/ANC/ANC_mac5_chr \
+		--w-ld-chr data/ldsc/1kgp_ref_ldsc/ANC/ANC_weights_chr \
+		--print-coefficients \
+		--overlap-annot \
+		--out results/ldsc/ctg/ANC/ANC_meta_full1_clean_rsid.nfiltered.biallelic.h2.ctg${i};
+done;
+bash ldsc_scripts/combine_ctg_results.sh ANC results/ldsc/ctg/ANC/ANC_meta_full1_clean_rsid.nfiltered.biallelic.h2
+
+# CTS analysis:
+cov-ldsc.py \
+	--h2-cts data/fema_data/ANC/ANC_meta_SEX1_clean_rsid.nfiltered.biallelic.sumstats.gz \
+	--ref-ld-chr data/ldsc/1kgp_ref_ldsc/ANC/ANC_chr \
+	--w-ld-chr data/ldsc/1kgp_ref_ldsc/ANC/ANC_weights_chr \
+	--ref-ld-chr-cts data/ldsc/1kgp_ref_ctg/ANC/ANC_cts.ldcts \
+	--out results/ldsc/ctg/ANC/ANC_meta_full1_clean_rsid.nfiltered.biallelic.h2
+
+# For the CTS analysis results, adjust the p-value with FDR:
+Rscript ldsc_scripts/fdr_addjust_cts.R results/ldsc/ctg/ANC/ANC_meta_full1_clean_rsid.nfiltered.biallelic.h2.cell_type_results.txt
+
