@@ -1,0 +1,517 @@
+---
+title: "Cytokine QTL Supp. Figure"
+author: "Riku & Tanya"
+date: "First Run: 21st Jan 2022; Updated: `r format(Sys.Date(), '%dth %b %Y')`"
+output:
+  rmarkdown::html_document:
+    toc: true
+    toc_depth: 5
+    toc_float: false
+    code_folding: "hide"
+---
+
+```{r markdown_setup, echo = FALSE, message = FALSE}
+# Set options you want to apply to all chunks here
+knitr::opts_chunk$set(cache = TRUE, tidy = TRUE, echo = TRUE, comment = "", tidy.opts = list(width.cutoff = 100), message = FALSE)
+options(width = 400)
+options(knitr.table.format = "html")
+options(knitr.kable.NA = "-")
+```
+
+```{r set_workingdir, echo = FALSE}
+# this sets the markdown document directory to the R project directory, not the directory the markdown is saved in (eg. can save markdown in project/docs, but run markdown from project/)
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+```
+
+**_Working Directory: `r getwd()`_**
+
+Requires `afp://biocldap.otago.ac.nz/archive` to be attached.
+
+<style>
+body {
+text-align: justify
+}
+</style>
+
+```{r load_libraries, warning = FALSE, message = FALSE}
+# for markdown formatting
+library(formatR)
+library(kableExtra)
+library(DT)
+
+# for project
+library(dplyr)
+library(car)
+library(ggplot2)
+```
+
+<br>
+
+
+This document is detailing the steps taken to work out whether there is a difference between the cytokine QTL data related to our GWAS SNPs when looking at cytokine stimulation by a control stimulus (C. albicans conidia) and MSU crystal stimulus.
+
+It is a reduced (and modified) version of the `/Users/flyta62p/Dropbox/Work_Files/MyProjects/BigGWAS/results/cytokineQTL/ks_test.Rmd` file.
+
+
+**Key changes:**
+
+
+  + Original files reduced to reflect finalised loci SNPs (July 2022)
+  + All results merged and aligned to loci (November 2022)
+  + Reduced SNPs to a European + TAMA (if missing) list of SNPs (November 2022)
+
+
+### Import and Tidy Data
+
+
+```{r import_data}
+import_files <- list.files(path = "results/cytokineQTL/cytokine_results/", pattern = ".txt")
+
+input_data <- list()
+for(file in import_files){
+  if(grepl(file, pattern = "merged")){
+    data <- read.table(paste0("results/cytokineQTL/cytokine_results/", file), header = TRUE, stringsAsFactors = FALSE)
+  # tidy data
+  data <- data %>%
+    mutate(chisq = qchisq(1 - pvalue, 1)) %>%
+    mutate(std.beta = as.numeric(scale(beta)))
+
+  # tidy data name
+  group_name <- gsub(file, pattern = "_loci_cqtl_merged.", replacement = "_")
+  group_name <- gsub(group_name, pattern = "_C.albicansconidia.txt", replacement = "_control")
+  group_name <- gsub(group_name, pattern = "_MSUC16.txt", replacement = "_MSU")
+
+  input_data[[group_name]] <- data
+
+  rm(data, group_name)
+  }
+}
+rm(file, import_files)
+```
+
+
+```{r load_loci_info}
+# load in loci info
+save_date <- "30Sept2022"
+
+loci_summary <- list()
+for(set in c("full", "male", "female")){
+  loci_summary[[set]] <- read.delim(paste0("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/loci_list/", set, "_loci_summary_updated_", save_date, "_withLD.txt"), header = TRUE)
+  loci_summary[[paste0(set, "_SNPs")]] <- read.delim(paste0("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/loci_list/", set, "_indepSNP_summary_updated_", save_date, ".txt"), header = TRUE)
+}
+rm(set, save_date)
+```
+
+
+```{r merge_input_data}
+## merge all result sources together per ancestry
+for(pop in c("eur", "tama")){
+  # merge all results
+  results <- merge(input_data[[paste0(pop, "_IL1b_control")]], input_data[[paste0(pop, "_IL1b_MSU")]], by = c("SNP", "CHR", "BP", "category", "rsId", "chr", "ps", "eff", "alt", "R2"), all = TRUE, suffixes = c(".ILB.control", ".ILB.MSU"))
+  results2 <- merge(input_data[[paste0(pop, "_IL6_control")]], input_data[[paste0(pop, "_IL6_MSU")]], by = c("SNP", "CHR", "BP", "category", "rsId", "chr", "ps", "eff", "alt", "R2"), all = TRUE, suffixes = c(".IL6.control", ".IL6.MSU"))
+  results <- merge(results, results2, by = c("SNP", "CHR", "BP", "category", "rsId", "chr", "ps", "eff", "alt", "R2"), all = TRUE)
+
+  input_data[[paste0(pop, "_merged")]] <- results
+  rm(results, results2)
+}
+rm(pop)
+
+## add locus name to results + merge european & tama versions
+all_results <- loci_summary[["full"]]
+all_results <- all_results[, 1:14]
+
+column_order <- names(all_results)
+
+all_results <- merge(all_results, input_data[["eur_merged"]], by.x = "EUR", by.y = "SNP", all.x = TRUE)
+all_results <- merge(all_results, input_data[["tama_merged"]], by.x = "TAMA", by.y = "SNP", all.x = TRUE, suffixes = c(".eur", ".tama"))
+
+
+## tidy merged file
+all_results[is.na(all_results)] <- ""
+# 1. remove extra TAMA SNP (EUR and TAMA have proxy SNPs, TAMA has two as one is 'better' proxy than EUR proxy)
+all_results <- all_results[all_results$rsId.tama != "rs66648777", ]
+
+# fix column names & order
+names(all_results)[c(4, 19, 48)] <- c("chr", "chr.eur", "chr.tama")
+
+all_results <- all_results[, c(column_order, paste0(names(input_data[["eur_merged"]])[-1], ".eur"), paste0(names(input_data[["eur_merged"]])[-1], ".tama"))]
+rm(column_order)
+
+# fix locus order
+all_results <- all_results[order(all_results$chr, all_results$start, all_results$locus), ]
+```
+
+
+Based on the merged data several SNPs (n = 9) have been classified as urate-assoc in European, but non-urate-assoc in TAMA (or vice versa). These classifications need to be modified to the most conservative group (so any urate-assoc moves to urate-assoc category).
+
+
+```{r reclassify_loci}
+# view mismatches
+table(all_results$category.eur, all_results$category.tama)
+
+# paste categories together
+all_results$urate_category <- paste(all_results$category.eur, all_results$category.tama)
+
+# use grep to find/replace based on any urate classification
+all_results$urate_category[grepl(all_results$urate_category, pattern = "Urate")] <- "urate-assoc"
+all_results$urate_category[grepl(all_results$urate_category, pattern = "gout")] <- "non urate-assoc"
+
+# convert one SNP back to European classification (HU-to-gout in EUR, urate-only in TAMA, but EUR/TAMA SNPs in No LD & using EUR SNP in final results)
+all_results$urate_category[all_results$EUR == "rs78477512"] <- "non urate-assoc"
+
+table(all_results$urate_category)
+
+# delete old categories columns
+all_results <- all_results[, c(1:14, 73, 15:16, 18:45, 47:72)]
+```
+
+
+```{r save_merged_data, eval = FALSE}
+write.table(all_results, file = "results/cytokineQTL/merged_cQTLresults_byloci.txt", quote = FALSE, sep = "\t", na = "", row.names = FALSE)
+```
+
+
+
+### Select Data for Analysis
+
+There are `r nrow(all_results[all_results$EUR != "", ])` locus signals (includes A/B/C loci versions) with a European signal. `r nrow(all_results[all_results$EUR != "" & all_results$rsId.eur == "", ])` of these signals do not have cQTL data aligned in the European columns.
+
+There are `r nrow(all_results[all_results$TAMA != "", ])` locus signals (includes A/B/C loci versions) with a TAMA signal. `r nrow(all_results[all_results$TAMA != "" & all_results$rsId.tama == "", ])` of these signals do not have cQTL data aligned in the TAMA columns.
+
+For the final results of this analysis the European SNP will be preferentially selected. If a locus is a non-European locus, or one of the `r nrow(all_results[all_results$EUR != "" & all_results$rsId.eur == "", ])` missing a European signal, the TAMA SNP will be used instead.
+
+`r nrow(all_results[all_results$urate_category == " ", ])` locus cannot be included in this analysis as it is Latinx-specific. `r nrow(all_results[all_results$chr == 23, ])` loci cannot be included in this analysis as they are on chromosome X, which does not have cQTL data.
+
+This leaves `r nrow(all_results[all_results$chr != 23 & all_results$urate_category != " ", ])` loci/signals that can possibly be included in this analysis, `r nrow(all_results[all_results$rsId.eur != "" | all_results$rsId.tama != "", ])` of which have cQTL data available.
+
+
+```{r add_source_column}
+all_results_touse <- all_results
+all_results_touse$SNPsource <- ""
+
+all_results_touse$SNPsource[all_results_touse$rsId.eur != ""] <- "European Lead SNP"
+all_results_touse$SNPsource[all_results_touse$EUR != all_results_touse$rsId.eur & all_results_touse$rsId.eur != ""] <- "European Proxy SNP"
+all_results_touse$SNPsource[all_results_touse$TAMA != all_results_touse$rsId.tama & all_results_touse$rsId.tama != "" & all_results_touse$SNPsource == ""] <- "Trans-Ancestry Proxy SNP"
+all_results_touse$SNPsource[all_results_touse$rsId.tama != "" & all_results_touse$SNPsource == ""] <- "Trans-Ancestry Lead SNP"
+```
+
+
+```{r select_data}
+## split into european & tama versions, with relevant cQTL results kept
+# european
+all_results_touse_eur <- all_results_touse[all_results_touse$SNPsource %in% c("European Lead SNP", "European Proxy SNP", ""), ]
+all_results_touse_eur <- all_results_touse_eur[, c(1:15, 72, 18:43)]
+# tama
+all_results_touse_tama <- all_results_touse[all_results_touse$SNPsource %in% c("Trans-Ancestry Lead SNP", "Trans-Ancestry Proxy SNP"), ]
+all_results_touse_tama <- all_results_touse_tama[, c(1:15, 72, 46:71)]
+
+## rename columns
+names(all_results_touse_eur) <- gsub(names(all_results_touse_eur), pattern = ".eur", replacement = "")
+names(all_results_touse_eur)[18] <- "chr.SNP"
+names(all_results_touse_tama) <- gsub(names(all_results_touse_tama), pattern = ".tama", replacement = "")
+names(all_results_touse_tama)[18] <- "chr.SNP"
+
+
+## rbind SNP sets
+all_results_touse <- rbind(all_results_touse_eur, all_results_touse_tama)
+rm(all_results_touse_eur, all_results_touse_tama)
+
+## reorder by loci again
+all_results_touse <- all_results_touse[order(all_results_touse$chr, all_results_touse$start, all_results_touse$locus), ]
+
+
+# convert relevant columns to numeric values
+for(column in c(2:5, 12:13, 18:19, 22:42)){
+  all_results_touse[, column] <- as.numeric(all_results_touse[, column])
+}
+rm(column)
+```
+
+
+After selecting the data/specific SNPs to keep in this analysis there was an additional `r nrow(all_results_touse[all_results_touse$SNPsource != "" & all_results_touse$eff == "", ])` loci where an rsID is present within the cQTL results, but no IL-1B or IL-6 response has been recorded.
+
+
+```{r save_selected_data, eval = FALSE}
+write.table(all_results_touse, file = "results/cytokineQTL/merged_cQTLresults_byloci_USE.txt", quote = FALSE, sep = "\t", na = "", row.names = FALSE)
+```
+
+
+### Create Supplemental Figure(s)
+
+##### Calculate Lambda Values and Kolmogorov-Smirnov Test P-value
+
+Lambda and K-S test calculated based on chi-square values (not p-values)
+
+**Analysis One:** Compare the control and experimental assays to an expected distribution (not to each other).
+
+
+```{r lambda_ks_chisq}
+lambda_chisq <- list()
+kstest_chisq <- list()
+for(category in c("urate-assoc", "non urate-assoc")){
+  for(cytokine in c("ILB", "IL6")){
+    for(stimulant in c("MSU", "control")){
+      chisq_values <- all_results_touse[all_results_touse$urate_category == category, paste("chisq", cytokine, stimulant, sep = ".")]
+      chisq_values <- chisq_values[!is.na(chisq_values)]
+      lambda_chisq[[paste(category, cytokine, stimulant, sep = "_")]] <- median(chisq_values)/qchisq(0.5, 1)
+      kstest_chisq[[paste(category, cytokine, stimulant, sep = "_")]] <- ks.test(x = chisq_values, y = pchisq, df = 1)
+      rm(chisq_values)
+    }
+    rm(stimulant)
+  }
+  rm(cytokine)
+}
+rm(category)
+```
+
+
+**Analysis Two:** Calculate a comparative KS test to get difference between control/experimental versions of assays.
+
+```{r compare_kstest_chisq}
+for(category in c("urate-assoc", "non urate-assoc")){
+  for(cytokine in c("ILB", "IL6")){
+    control_chisq <- all_results_touse[all_results_touse$urate_category == category, paste("chisq", cytokine, "control", sep = ".")]
+    control_chisq <- control_chisq[!is.na(control_chisq)]
+    MSU_chisq <- all_results_touse[all_results_touse$urate_category == category, paste("chisq", cytokine, "MSU", sep = ".")]
+    MSU_chisq <- MSU_chisq[!is.na(MSU_chisq)]
+
+    kstest_chisq[[paste(category, cytokine, "compare", sep = "_")]] <- ks.test(x = control_chisq, y = MSU_chisq)
+
+    rm(control_chisq, MSU_chisq)
+  }
+  rm(cytokine)
+}
+rm(category)
+```
+
+
+#### QQ-Plots
+
+
+```{r make_QQ_figure_ILB}
+
+png(file = "results/cytokineQTL/cytokine_plots/S12_QQplot-IL1B-forpaper.png", width = 12, height = 10, res = 300, units = "in")
+  par(mar = c(4, 5, 1, 2))
+  layout(matrix(c(1, 1, 1, 2, 3, 4, 5, 5, 5, 6, 7, 8), ncol = 3, byrow = TRUE), heights = c(2, 4, 1, 4))
+
+# non urate associated version
+  ## add title - top plots
+
+  plot.new()
+    text(x = 0.5, y = 0.6, labels = "IL-1\u03B2 Cytokine QTLs", font = 2, cex = 2)
+
+  ## add sub-title - top plots
+    text(x = 0.5, y = 0.2, labels = "Non Urate-Associated SNP Set", font = 2, cex = 1.3)
+
+
+  ## plot MSU data
+    ## plot experimental data
+  qqPlot(x = all_results_touse$chisq.ILB.MSU[all_results_touse$urate_category == "non urate-assoc"], main = "", ylab = expression(paste("Observed ", chi^2)), xlab = expression(paste("Expected ", chi^2)), distribution = "chisq", df = 1, id = list(method = "y", n = 2, cex = 0.8, location = "lr", labels = all_results_touse$rsId[all_results_touse$urate_category == "non urate-assoc"]), pch = 18, col = "#B865A1", col.lines = "#DCF2F4", cex = 1.3, grid = FALSE, ylim = c(0, 14))
+  # add lambda value and KS p-value
+  legend(x = "topleft", legend = as.expression(paste("\u03BB =", sprintf(lambda_chisq[["non urate-assoc_ILB_MSU"]], fmt = "%.1f"))), col = "white", bty = "n")
+  # add headers
+  mtext(text = "Experimental Assay", line = 2, font = 2)
+  mtext(text = "(MSU/C16 Stimulation)", line = 1, font = 2, cex = 0.8)
+
+  ## plot control data
+  qqPlot(x = all_results_touse$chisq.ILB.control[all_results_touse$urate_category == "non urate-assoc"], main = "", ylab = expression(paste("Observed ", chi^2)), xlab = expression(paste("Expected ", chi^2)), distribution = "chisq", df = 1, id = list(method = "y", n = 2, cex = 0.8, location = "lr", labels = all_results_touse$rsId[all_results_touse$urate_category == "non urate-assoc"]), pch = 18, col = "#B865A1", col.lines = "#DCF2F4", cex = 1.3, grid = FALSE, ylim = c(0, 14))
+  # add lambda value & KS p-value
+  legend(x = "topleft", legend = as.expression(paste("\u03BB =", sprintf(lambda_chisq[["non urate-assoc_ILB_control"]], fmt = "%.1f"))), col = "white", bty = "n")
+  # add headers
+  mtext(text = "Control Assay", line = 2, font = 2)
+  mtext(text = "(C. albicans Stimulation)", line = 1, font = 2, cex = 0.8)
+
+
+
+  ## plot comparison data
+  plot(x = all_results_touse$std.beta.ILB.control[all_results_touse$urate_category == "non urate-assoc"], y = all_results_touse$std.beta.ILB.MSU[all_results_touse$urate_category == "non urate-assoc"], xlab = expression(paste("Control Assay ", beta, "-value (Standardized)")), ylab = expression(paste("Experiemntal Assay ", beta, "-value (Standardized)")), pch = 18, col = "#B865A1", xlim = c(-4, 4), ylim = c(-4, 4), cex = 1.3)
+# create correlation model
+model = lm(std.beta.ILB.MSU ~ std.beta.ILB.control, data = all_results_touse, subset = urate_category == "non urate-assoc")
+x_plot = seq(from = -4, to = 4, by = 0.01)
+y_plot = predict(model, newdata = data.frame(std.beta.ILB.control = x_plot), interval = "confidence")
+# add fill
+polygon(x = c(rev(x_plot), x_plot), c(rev(y_plot[, 3]), y_plot[, 2]), col = "#DCF2F433", border = NA)
+# add lines
+matlines(x = x_plot, y = y_plot, lty = c(1, 1, 1), col = "#DCF2F4", lwd = c(1.2, 1, 1))
+  # add KS p-value
+if(coef(summary(model))[2, 4] < 0.005){
+  lm_format <- "%.1e"
+} else{
+  lm_format <- "%.2f"
+}
+  text(x = all_results_touse$std.beta.ILB.control[all_results_touse$rsId %in% c("rs9973741", "rs11586910", "rs10807251")], y = all_results_touse$std.beta.ILB.MSU[all_results_touse$rsId %in% c("rs9973741", "rs11586910", "rs10807251")], labels = all_results_touse$rsId[all_results_touse$rsId %in% c("rs9973741", "rs11586910", "rs10807251")], pos = 2, cex = 0.8)
+  legend(x = "topleft", legend = as.expression(bquote(italic(P)["cor"] == .(sprintf(coef(summary(model))[2, 4], fmt = lm_format)))), col = "white", bty = "n")
+
+  # add header
+  mtext(text = "Assay Comparison", line = 2, font = 2)
+#  mtext(text = "(Standardized )", line = 1, font = 2, cex = 0.8)
+
+
+# urate associated version
+  ## add title - top plots
+  plot.new()
+ #   text(x = 0.5, y = 0.8, labels = "IL-1\u03B2 Cytokine QTLs", font = 2, cex = 1.5)
+
+  ## add sub-title - top plots
+    text(x = 0.5, y = 0.2, labels = "Urate-Associated SNP Set", font = 2, cex = 1.3)
+
+
+  ## plot MSU data
+    ## plot experimental data
+  qqPlot(x = all_results_touse$chisq.ILB.MSU[all_results_touse$urate_category == "urate-assoc"], main = "", ylab = expression(paste("Observed ", chi^2)), xlab = expression(paste("Expected ", chi^2)), distribution = "chisq", df = 1, id = list(method = "y", n = 2, cex = 0.8, location = "lr", labels = all_results_touse$rsId[all_results_touse$urate_category == "urate-assoc"]), pch = 18, col = "#B865A1", col.lines = "#DCF2F4", cex = 1.3, grid = FALSE, ylim = c(0, 14))
+  # add lambda value and KS p-value
+  legend(x = "topleft", legend = as.expression(paste("\u03BB =", sprintf(lambda_chisq[["urate-assoc_ILB_MSU"]], fmt = "%.1f"))), col = "white", bty = "n")
+  # add headers
+  mtext(text = "Experimental Assay", line = 2, font = 2)
+  mtext(text = "(MSU/C16 Stimulation)", line = 1, font = 2, cex = 0.8)
+
+  ## plot control data
+  qqPlot(x = all_results_touse$chisq.ILB.control[all_results_touse$urate_category == "urate-assoc"], main = "", ylab = expression(paste("Observed ", chi^2)), xlab = expression(paste("Expected ", chi^2)), distribution = "chisq", df = 1, id = list(method = "y", n = 2, cex = 0.8, location = "lr", labels = all_results_touse$rsId[all_results_touse$urate_category == "urate-assoc"]), pch = 18, col = "#B865A1", col.lines = "#DCF2F4", cex = 1.3, grid = FALSE, ylim = c(0, 14))
+  # add lambda value & KS p-value
+  legend(x = "topleft", legend = as.expression(paste("\u03BB =", sprintf(lambda_chisq[["urate-assoc_ILB_control"]], fmt = "%.1f"))), col = "white", bty = "n")
+  # add headers
+  mtext(text = "Control Assay", line = 2, font = 2)
+  mtext(text = "(C. albicans Stimulation)", line = 1, font = 2, cex = 0.8)
+
+
+
+  ## plot comparison data
+  plot(x = all_results_touse$std.beta.ILB.control[all_results_touse$urate_category == "urate-assoc"], y = all_results_touse$std.beta.ILB.MSU[all_results_touse$urate_category == "urate-assoc"], xlab = expression(paste("Control Assay ", beta, "-value (Standardized)")), ylab = expression(paste("Experiemntal Assay ", beta, "-value (Standardized)")), pch = 18, col = "#B865A1", xlim = c(-4, 4), ylim = c(-4, 4), cex = 1.3)
+# create correlation model
+model = lm(std.beta.ILB.MSU ~ std.beta.ILB.control, data = all_results_touse, subset = urate_category == "urate-assoc")
+x_plot = seq(from = -4, to = 4, by = 0.01)
+y_plot = predict(model, newdata = data.frame(std.beta.ILB.control = x_plot), interval = "confidence")
+# add fill
+polygon(x = c(rev(x_plot), x_plot), c(rev(y_plot[, 3]), y_plot[, 2]), col = "#DCF2F433", border = NA)
+# add lines
+matlines(x = x_plot, y = y_plot, lty = c(1, 1, 1), col = "#DCF2F4", lwd = c(1.2, 1, 1))
+ text(x = all_results_touse$std.beta.ILB.control[all_results_touse$rsId %in% c("rs941298", "rs4727501", "rs469882", "rs7224610")], y = all_results_touse$std.beta.ILB.MSU[all_results_touse$rsId %in% c("rs941298", "rs4727501", "rs469882", "rs7224610")], labels = all_results_touse$rsId[all_results_touse$rsId %in% c("rs941298", "rs4727501", "rs469882", "rs7224610")], pos = 2, cex = 0.8)
+  # add KS p-value
+if(coef(summary(model))[2, 4] < 0.005){
+  lm_format <- "%.1e"
+} else{
+  lm_format <- "%.2f"
+}
+  legend(x = "topleft", legend = as.expression(bquote(italic(P)["cor"] == .(sprintf(coef(summary(model))[2, 4], fmt = lm_format)))), col = "white", bty = "n")
+
+  # add header
+  mtext(text = "Assay Comparison", line = 2, font = 2)
+#  mtext(text = "(Standardized )", line = 1, font = 2, cex = 0.8)
+
+  dev.off()
+```
+
+```{r make_QQ_figure_IL6}
+
+png(file = "results/cytokineQTL/cytokine_plots/S12_QQplot-IL6-forpaper.png", width = 12, height = 10, res = 300, units = "in")
+  par(mar = c(4, 5, 1, 2))
+  layout(matrix(c(1, 1, 1, 2, 3, 4, 5, 5, 5, 6, 7, 8), ncol = 3, byrow = TRUE), heights = c(2, 4, 1, 4))
+
+# non urate associated version
+  ## add title - top plots
+
+  plot.new()
+    text(x = 0.5, y = 0.6, labels = "IL-6 Cytokine QTLs", font = 2, cex = 2)
+
+  ## add sub-title - top plots
+    text(x = 0.5, y = 0.2, labels = "Non Urate-Associated SNP Set", font = 2, cex = 1.3)
+
+
+  ## plot MSU data
+    ## plot experimental data
+  qqPlot(x = all_results_touse$chisq.IL6.MSU[all_results_touse$urate_category == "non urate-assoc"], main = "", ylab = expression(paste("Observed ", chi^2)), xlab = expression(paste("Expected ", chi^2)), distribution = "chisq", df = 1, id = list(method = "y", n = 2, cex = 0.8, location = "lr", labels = all_results_touse$rsId[all_results_touse$urate_category == "non urate-assoc"]), pch = 18, col = "#B865A1", col.lines = "#DCF2F4", cex = 1.3, grid = FALSE, ylim = c(0, 14))
+  # add lambda value and KS p-value
+  legend(x = "topleft", legend = as.expression(paste("\u03BB =", sprintf(lambda_chisq[["non urate-assoc_IL6_MSU"]], fmt = "%.1f"))), col = "white", bty = "n")
+  # add headers
+  mtext(text = "Experimental Assay", line = 2, font = 2)
+  mtext(text = "(MSU/C16 Stimulation)", line = 1, font = 2, cex = 0.8)
+
+  ## plot control data
+  qqPlot(x = all_results_touse$chisq.IL6.control[all_results_touse$urate_category == "non urate-assoc"], main = "", ylab = expression(paste("Observed ", chi^2)), xlab = expression(paste("Expected ", chi^2)), distribution = "chisq", df = 1, id = list(method = "y", n = 2, cex = 0.8, location = "lr", labels = all_results_touse$rsId[all_results_touse$urate_category == "non urate-assoc"]), pch = 18, col = "#B865A1", col.lines = "#DCF2F4", cex = 1.3, grid = FALSE, ylim = c(0, 14))
+  # add lambda value & KS p-value
+  legend(x = "topleft", legend = as.expression(paste("\u03BB =", sprintf(lambda_chisq[["non urate-assoc_IL6_control"]], fmt = "%.1f"))), col = "white", bty = "n")
+  # add headers
+  mtext(text = "Control Assay", line = 2, font = 2)
+  mtext(text = "(C. albicans Stimulation)", line = 1, font = 2, cex = 0.8)
+
+
+
+  ## plot comparison data
+  plot(x = all_results_touse$std.beta.IL6.control[all_results_touse$urate_category == "non urate-assoc"], y = all_results_touse$std.beta.IL6.MSU[all_results_touse$urate_category == "non urate-assoc"], xlab = expression(paste("Control Assay ", beta, "-value (Standardized)")), ylab = expression(paste("Experiemntal Assay ", beta, "-value (Standardized)")), pch = 18, col = "#B865A1", xlim = c(-4, 4), ylim = c(-4, 4), cex = 1.3)
+# create correlation model
+model = lm(std.beta.IL6.MSU ~ std.beta.IL6.control, data = all_results_touse, subset = urate_category == "non urate-assoc")
+x_plot = seq(from = -4, to = 4, by = 0.01)
+y_plot = predict(model, newdata = data.frame(std.beta.IL6.control = x_plot), interval = "confidence")
+# add fill
+polygon(x = c(rev(x_plot), x_plot), c(rev(y_plot[, 3]), y_plot[, 2]), col = "#DCF2F433", border = NA)
+# add lines
+matlines(x = x_plot, y = y_plot, lty = c(1, 1, 1), col = "#DCF2F4", lwd = c(1.2, 1, 1))
+  # add KS p-value
+if(coef(summary(model))[2, 4] < 0.005){
+  lm_format <- "%.1e"
+} else{
+  lm_format <- "%.2f"
+}
+  text(x = all_results_touse$std.beta.IL6.control[all_results_touse$rsId %in% c("rs9973741", "rs11586910", "rs12913266", "rs62037363")], y = all_results_touse$std.beta.IL6.MSU[all_results_touse$rsId %in% c("rs9973741", "rs11586910", "rs12913266", "rs62037363")], labels = all_results_touse$rsId[all_results_touse$rsId %in% c("rs9973741", "rs11586910", "rs12913266", "rs62037363")], pos = 2, cex = 0.8)
+  legend(x = "topleft", legend = as.expression(bquote(italic(P)["cor"] == .(sprintf(coef(summary(model))[2, 4], fmt = lm_format)))), col = "white", bty = "n")
+
+  # add header
+  mtext(text = "Assay Comparison", line = 2, font = 2)
+#  mtext(text = "(Standardized )", line = 1, font = 2, cex = 0.8)
+
+
+# urate associated version
+  ## add title - top plots
+  plot.new()
+  ## add sub-title - top plots
+    text(x = 0.5, y = 0.2, labels = "Urate-Associated SNP Set", font = 2, cex = 1.3)
+
+
+  ## plot MSU data
+    ## plot experimental data
+  qqPlot(x = all_results_touse$chisq.IL6.MSU[all_results_touse$urate_category == "urate-assoc"], main = "", ylab = expression(paste("Observed ", chi^2)), xlab = expression(paste("Expected ", chi^2)), distribution = "chisq", df = 1, id = list(method = "y", n = 2, cex = 0.8, location = "lr", labels = all_results_touse$rsId[all_results_touse$urate_category == "urate-assoc"]), pch = 18, col = "#B865A1", col.lines = "#DCF2F4", cex = 1.3, grid = FALSE, ylim = c(0, 14))
+  # add lambda value and KS p-value
+  legend(x = "topleft", legend = as.expression(paste("\u03BB =", sprintf(lambda_chisq[["urate-assoc_IL6_MSU"]], fmt = "%.1f"))), col = "white", bty = "n")
+  # add headers
+  mtext(text = "Experimental Assay", line = 2, font = 2)
+  mtext(text = "(MSU/C16 Stimulation)", line = 1, font = 2, cex = 0.8)
+
+  ## plot control data
+  qqPlot(x = all_results_touse$chisq.IL6.control[all_results_touse$urate_category == "urate-assoc"], main = "", ylab = expression(paste("Observed ", chi^2)), xlab = expression(paste("Expected ", chi^2)), distribution = "chisq", df = 1, id = list(method = "y", n = 2, cex = 0.8, location = "lr", labels = all_results_touse$rsId[all_results_touse$urate_category == "urate-assoc"]), pch = 18, col = "#B865A1", col.lines = "#DCF2F4", cex = 1.3, grid = FALSE, ylim = c(0, 14))
+  # add lambda value & KS p-value
+  legend(x = "topleft", legend = as.expression(paste("\u03BB =", sprintf(lambda_chisq[["urate-assoc_IL6_control"]], fmt = "%.1f"))), col = "white", bty = "n")
+  # add headers
+  mtext(text = "Control Assay", line = 2, font = 2)
+  mtext(text = "(C. albicans Stimulation)", line = 1, font = 2, cex = 0.8)
+
+
+
+  ## plot comparison data
+  plot(x = all_results_touse$std.beta.IL6.control[all_results_touse$urate_category == "urate-assoc"], y = all_results_touse$std.beta.IL6.MSU[all_results_touse$urate_category == "urate-assoc"], xlab = expression(paste("Control Assay ", beta, "-value (Standardized)")), ylab = expression(paste("Experiemntal Assay ", beta, "-value (Standardized)")), pch = 18, col = "#B865A1", xlim = c(-4, 4), ylim = c(-4, 4), cex = 1.3)
+# create correlation model
+model = lm(std.beta.IL6.MSU ~ std.beta.IL6.control, data = all_results_touse, subset = urate_category == "urate-assoc")
+x_plot = seq(from = -4, to = 4, by = 0.01)
+y_plot = predict(model, newdata = data.frame(std.beta.IL6.control = x_plot), interval = "confidence")
+# add fill
+polygon(x = c(rev(x_plot), x_plot), c(rev(y_plot[, 3]), y_plot[, 2]), col = "#DCF2F433", border = NA)
+# add lines
+matlines(x = x_plot, y = y_plot, lty = c(1, 1, 1), col = "#DCF2F4", lwd = c(1.2, 1, 1))
+ text(x = all_results_touse$std.beta.IL6.control[all_results_touse$rsId %in% c("rs6934962", "rs2503700", "rs115986297", "rs4715379")], y = all_results_touse$std.beta.IL6.MSU[all_results_touse$rsId %in% c("rs6934962", "rs2503700", "rs115986297", "rs4715379")], labels = all_results_touse$rsId[all_results_touse$rsId %in% c("rs6934962", "rs2503700", "rs115986297", "rs4715379")], pos = 2, cex = 0.8)
+  # add KS p-value
+if(coef(summary(model))[2, 4] < 0.005){
+  lm_format <- "%.1e"
+} else{
+  lm_format <- "%.2f"
+}
+  legend(x = "topleft", legend = as.expression(bquote(italic(P)["cor"] == .(sprintf(coef(summary(model))[2, 4], fmt = lm_format)))), col = "white", bty = "n")
+
+  # add header
+  mtext(text = "Assay Comparison", line = 2, font = 2)
+#  mtext(text = "(Standardized )", line = 1, font = 2, cex = 0.8)
+
+  dev.off()
+```
+
+
+In these comparison plots the _P_~KS~ value is based on the chi-square distributions of each assay. The _P_~cor~ value is based off the correlation between the beta-values from each assay (obtained using `lm()`).
+
