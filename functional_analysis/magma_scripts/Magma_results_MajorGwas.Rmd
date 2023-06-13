@@ -1,0 +1,510 @@
+---
+title: "Magma Analysis of the Major Gout GWAS"
+author: "Ruth Topless"
+date: "`r format(Sys.Date())`"
+output: html_document
+---
+### note methods are at the bottom.
+
+```{r, echo=FALSE, message=FALSE}
+library(tidyverse)
+library(DT)
+library(bReakingbad)
+
+gwasResults<-read.table(file = "/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_EUR_2021_long.genes.out", sep="", strip.white = TRUE, header=TRUE)
+
+gwasResults$CHR<-sub("X","23",gwasResults$CHR)
+gwasResults$CHR<-as.numeric(gwasResults$CHR)
+
+```
+
+MAGMA method = SNP-WISE for summary stat runs.
+Test of mean SNP association
+Uses sum of -log(SNP p-value) as test statistic
+Equivalent to VEGAS, PLINK --set model
+Equivalent to SKAT model using inverse variance weights
+
+
+18409 genes included.
+
+Bonferroni significance level = 2.6x10-6
+
+
+From Meddens et al:
+"We performed MAGMA gene-based analysis to assess the number of genes that reached “genome-wide significance” based on our meta-analysis results, where the P value threshold to declare genome-wide significance here is based on the number of genes tested (rather than the number of independent SNPs tested). This greatly reduces the multiple testing burden, and may reveal statistically associated genetic loci that do not yet harbor statistically significant SNPs yet due to insufficient statistical power.
+All the SNPs from our summary statistics that were located between the transcription start and stop sites of a gene were annotated to that gene, as based on NCBI 37.3.13 gene definitions. This gene annotation is a slight limitation of MAGMA, as biologically relevant genes are also regulated by genetic variants that lie outside of the gene itself. MAGMA first calculates a per- gene test statistic (based on SNP summary statistic data) as the mean of the GWAS –log10 P values for all the SNPs between the transcription start and stop sites of a gene. MAGMA then calculates a P value for the resulting gene test statistic, using a procedure that takes into account the non-independence of the SNPs within the gene due to LD. We used our main reference panel (described in Supplementary Information section 2.3.1) for LD estimations. MAGMA does not correct for LD between genes, which can result in several genes in the same genomic locus reaching statistical significance because they are in LD with each other. Bonferroni correction was applied to account for multiple testing, counting each gene as an “independent” test. Since genes are often in LD with each other, this is a conservative correction for multiple testing."
+
+
+This is without a widow around the genes. I can add a window a number of KB around each gene as part of the settings.
+
+I used the same 1000genomes references as for the other work we have done on the GWAS (/Volumes/scratch/merrimanlab/major_gwas_paper_scratch/data_functional/1kgp_wgs_plink/EUR_wgs etc). It's hard to tell how many SNPs we lose due to poor reference and how many we loose due to being outside the gene boundaries.
+
+
+NOTE: graph has hover over function
+
+```{r, echo=FALSE, message=FALSE}
+library(plotly)
+
+#Add midpoint fpr plotting
+gwasResults$midpoint<-(gwasResults$START+gwasResults$STOP)/2
+
+
+# Prepare the dataset
+don <- gwasResults %>%
+
+  # Compute chromosome size
+  group_by(CHR) %>%
+  summarise(chr_len=max(STOP)) %>%
+
+  # Calculate cumulative position of each chromosome
+  mutate(tot=cumsum(as.numeric(chr_len))-chr_len) %>%
+  select(-chr_len) %>%
+
+  # Add this info to the initial dataset
+  left_join(gwasResults, ., by=c("CHR"="CHR")) %>%
+
+  # Add a cumulative position of each SNP
+  arrange(CHR, midpoint) %>%
+  mutate( BPcum=midpoint+tot) %>%
+
+  # Add highlight and annotation information
+  #mutate( is_highlight=ifelse(SNP %in% snpsOfInterest, "yes", "no")) %>%
+
+  # Filter SNP to make the plot lighter
+  filter(-log10(P)>0.5)
+
+# Prepare X axis
+axisdf <- don %>% group_by(CHR)%>% summarize(center=( max(BPcum) + min(BPcum) ) / 2 )
+
+# Prepare text description for each SNP:
+don$text <- paste("GENE: ", don$GENE, "\nPosition: ", don$midpoint, "\nChromosome: ", don$CHR, sep="")
+
+# Make the plot
+p <- ggplot(don, aes(x=BPcum, y=-log10(P), text=text)) +
+
+    # Show all points
+    geom_point( aes(color=as.factor(CHR)), alpha=0.8, size=1.3) +
+    scale_color_manual(values = rep(c("grey", "skyblue"), 22 )) +
+    geom_hline(yintercept=-log10(0.05/19220), colour="dark blue")+
+
+    # custom X axis:
+    scale_x_continuous( label = axisdf$CHR, breaks= axisdf$center ) +
+    scale_y_continuous(expand = c(0, 0) ) +     # remove space between plot area and x axis
+    ylim(0,280) +
+    xlab("Chromosome position") +
+    ylab("Mean P value (-log10)")+
+
+
+    # Add highlighted points
+    #geom_point(data=subset(don, is_highlight=="yes"), color="orange", size=2) +
+
+    # Custom the theme:
+    theme_bw() +
+    theme(
+      legend.position="none",
+      panel.border = element_blank(),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor.x = element_blank()
+    )
+ggplotly(p, tooltip="text")
+```
+
+
+
+```{r, echo=F, results='asis'}
+
+gwasResults %>% select(GENE, CHR, START, STOP, NSNPS, P) %>% arrange(., P) %>% filter(P<0.0000026)  %>% DT::datatable(., caption = "MAGMA gene analysis _ Europeans",   escape = F, options = list(pageLength = 20, autoWidth = TRUE))
+
+```
+
+
+# Methods
+
+Prep for running Magma: Download Static Linking version from https://ctg.cncr.nl/software/magma
+Download gene locations file for correct build (used build 37), and ref 1000genomes data for LD (note I used the 1000genomes refernces we used for other stages).
+
+Create SNP_loc file, it should be in the order of SNP, CHR and BP, without headerline.
+Could possibly have used the European one for all of them but when troubleshooting an error I though I needed separate ones, so I made separate ones.
+
+```cut -f-3,1,2,2,4,5 /Volumes/archive/merrimanlab/major_gwas_paper_archive/results_meta_analysis/EUR/full/EUR_meta_full1_clean_rsid.nfiltered.biallelic.txt > /Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_EUR_BIM.txt```
+
+rearrange columns
+```awk '{OFS="\t"; print $3,$1,$2,$3,$4,$5}' /Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_EUR_BIM.txt > /Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_EUR_BIM2.txt```
+
+Run gene annotations
+```magma_v1.07bb_static/magma --annotate --snp-loc GWAS_EUR_BIM2.txt --gene-loc UCSC.b37/UCSC_GRCh37_UniqueCoding.gene.loc --out GWAS_GENE_ANNOTATE_2020 > GWAS_GENE_ANNOTATE_2020.log```
+
+```
+magma_v1.07bb_static/magma --annotate --snp-loc GWAS_EUR_BIM2.txt --gene-loc gencode.b37/Gencode_GRCh37_Unique_OnlyProteinCoding.gene.loc --out GWAS_GENE_ANNOTATE_2021 > GWAS_GENE_ANNOTATE_2021.log
+magma_v1.07bb_static/magma --annotate --snp-loc GWAS_EUR_BIM2.txt --gene-loc gencode.b37/Gencode_GRCh37_Unique_NoPsuedo.gene.loc --out GWAS_GENE_ANNOTATE_2021_long > GWAS_GENE_ANNOTATE_long_2021.log
+```
+
+Make a copy of test results with P values. Needs SNP and P column.
+```
+cut -f-3,1,2,12,18 /Volumes/archive/merrimanlab/major_gwas_paper_archive/results_meta_analysis/EUR/full/EUR_meta_full1_clean_rsid.nfiltered.biallelic.txt > GWAS_EUR_P.txt
+cut -f-3,1,2,12,18 /Volumes/archive/merrimanlab/major_gwas_paper_archive/results_meta_analysis/LAT/full/LAT_meta_full1_clean_rsid.nfiltered.biallelic.txt > GWAS_LAT_P.txt
+cut -f-3,1,2,12,18 /Volumes/archive/merrimanlab/major_gwas_paper_archive/results_meta_analysis/AFR/full/AFR_meta_full1_clean_rsid.nfiltered.biallelic.txt > GWAS_AFR_P.txt
+cut -f-3,1,2,12,18 /Volumes/archive/merrimanlab/major_gwas_paper_archive/results_meta_analysis/EAS/full/EAS_meta_full1_clean_rsid.nfiltered.biallelic.txt > GWAS_EAS_P.txt
+#cut -f-3,1,2,12,18 /Volumes/archive/merrimanlab/major_gwas_paper_archive/results_meta_analysis/HU/full/HU_meta_full1_clean_rsid.nfiltered.biallelic.txt > GWAS_HU_P.txt
+```
+
+Run Magma gene analysis
+```
+magma_v1.07bb_static/magma --bfile /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/data_functional/1kgp_wgs_plink/EUR_wgs --pval GWAS_EUR_P.txt ncol=N  --gene-annot GWAS_GENE_ANNOTATE_2021.genes.annot --out GWAS_EUR_2021 > GWAS_EUR_2021.log
+magma_v1.07bb_static/magma --bfile /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/data_functional/1kgp_wgs_plink/LAT_wgs --pval GWAS_LAT_P.txt ncol=N  --gene-annot GWAS_GENE_ANNOTATE_2021.genes.annot --out GWAS_LAT_2021 > GWAS_LAT_2021.log
+magma_v1.07bb_static/magma --bfile /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/data_functional/1kgp_wgs_plink/AFR_wgs --pval GWAS_AFR_P.txt ncol=N  --gene-annot GWAS_GENE_ANNOTATE_2021.genes.annot --out GWAS_AFR_2021 > GWAS_AFR_2021.log
+magma_v1.07bb_static/magma --bfile /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/data_functional/1kgp_wgs_plink/EAS_wgs --pval GWAS_EAS_P.txt ncol=N  --gene-annot GWAS_GENE_ANNOTATE_2021.genes.annot --out GWAS_EAS_2021 > GWAS_EAS_2021.log
+
+magma_v1.07bb_static/magma --bfile /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/data_functional/1kgp_wgs_plink/EUR_wgs --pval GWAS_EUR_P.txt ncol=N  --gene-annot GWAS_GENE_ANNOTATE_2021_long.genes.annot --out GWAS_EUR_2021_long > GWAS_EUR_2021_long.log
+magma_v1.07bb_static/magma --bfile /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/data_functional/1kgp_wgs_plink/LAT_wgs --pval GWAS_LAT_P.txt ncol=N  --gene-annot GWAS_GENE_ANNOTATE_2021_long.genes.annot --out GWAS_LAT_2021_long > GWAS_LAT_2021_long.log
+magma_v1.07bb_static/magma --bfile /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/data_functional/1kgp_wgs_plink/AFR_wgs --pval GWAS_AFR_P.txt ncol=N  --gene-annot GWAS_GENE_ANNOTATE_2021_long.genes.annot --out GWAS_AFR_2021_long > GWAS_AFR_2021_long.log
+magma_v1.07bb_static/magma --bfile /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/data_functional/1kgp_wgs_plink/EAS_wgs --pval GWAS_EAS_P.txt ncol=N  --gene-annot GWAS_GENE_ANNOTATE_2021_long.genes.annot --out GWAS_EAS_2021_long > GWAS_EAS_2021_long.log
+```
+
+TAMA needed to be run a bit differently as no P value
+```cut -f-3,1,2,4,5,7,9 /Volumes/archive/merrimanlab/major_gwas_paper_archive/results_meta_analysis/TAMA/full/tama_full_clean.nfiltered.biallelic.txt > TAMA_bim_P_working.txt```
+
+```{r, eval=F}
+tama<-read.delim("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/TAMA_bim_P_working.txt")
+tama_bim<-tama[,c("SNP", "CHR", "POS","SNP","REF","OTH")]
+colnames(tama_bim)<-c("SNP", "CHR", "BP",	"SNP", "minor", "major")
+write.table(tama_bim,"/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_TAMA_BIM2.txt", sep="\t", na="", quote = F, row.names = F)
+tama<-tama %>% mutate(P = if_else(logBF < 1, 1, 10^-(logBF)))
+write.table(tama[,c("CHR","POS","SNP","P","N")],"/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_TAMA_P.txt", sep="\t", na="", quote = F, row.names = F)
+```
+```
+magma_v1.07bb_static/magma --annotate --snp-loc GWAS_TAMA_BIM2.txt --gene-loc gencode.b37/Gencode_GRCh37_Unique_OnlyProteinCoding.gene.loc --out GWAS_GENE_ANNOTATE_2021_TAMA > GWAS_GENE_ANNOTATE_2021_TAMA.log
+magma_v1.07bb_static/magma --annotate --snp-loc GWAS_TAMA_BIM2.txt --gene-loc gencode.b37/Gencode_GRCh37_Unique_NoPsuedo.gene.loc --out GWAS_GENE_ANNOTATE_long_2021_TAMA > GWAS_GENE_ANNOTATE_long_2021_TAMA.log
+```
+
+Run Magma gene analysis
+```
+magma_v1.07bb_static/magma --bfile /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/data_functional/1kgp_wgs_plink/TAMA_wgs --pval GWAS_TAMA_P.txt ncol=N --gene-annot GWAS_GENE_ANNOTATE_2021_TAMA.genes.annot --out GWAS_TAMA_2021 > GWAS_TAMA_2021.log```
+magma_v1.07bb_static/magma --bfile /Volumes/scratch/merrimanlab/major_gwas_paper_scratch/data_functional/1kgp_wgs_plink/TAMA_wgs --pval GWAS_TAMA_P.txt ncol=N --gene-annot GWAS_GENE_ANNOTATE_long_2021_TAMA.genes.annot --out GWAS_TAMA_long_2021 > GWAS_TAMA_long_2021.log```
+
+```{r}
+#Merge in nice names
+genes<-read.delim("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/gencode.b37/Gencode_GRCh37_Unique_OnlyProteinCoding.gene.loc", header = F)
+
+EUR<-read.csv("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_EUR_2021.genes.out", sep="")
+EUR<-merge(EUR, genes[,c(1,6)], by.x="GENE", by.y="V1")
+colnames(EUR)[10]<-"HGNC_code"
+write.table(EUR,"/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_EUR_2021.genes.out.anno", sep="\t", na="", row.names=F, quote=F )
+
+LAT<-read.csv("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_LAT_2021.genes.out", sep="")
+LAT<-merge(LAT, genes[,c(1,6)], by.x="GENE", by.y="V1")
+colnames(LAT)[10]<-"HGNC_code"
+write.table(LAT,"/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_LAT_2021.genes.out.anno", sep="\t", na="", row.names=F, quote=F )
+
+AFR<-read.csv("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_AFR_2021.genes.out", sep="")
+AFR<-merge(AFR, genes[,c(1,6)], by.x="GENE", by.y="V1")
+colnames(AFR)[10]<-"HGNC_code"
+write.table(AFR,"/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_AFR_2021.genes.out.anno", sep="\t", na="", row.names=F, quote=F )
+
+EAS<-read.csv("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_EAS_2021.genes.out", sep="")
+EAS<-merge(EAS, genes[,c(1,6)], by.x="GENE", by.y="V1")
+colnames(EAS)[10]<-"HGNC_code"
+write.table(EAS,"/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_EAS_2021.genes.out.anno", sep="\t", na="", row.names=F, quote=F )
+
+TAMA<-read.csv("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_TAMA_2021.genes.out", sep="")
+TAMA<-merge(TAMA, genes[,c(1,6)], by.x="GENE", by.y="V1")
+colnames(TAMA)[10]<-"HGNC_code"
+write.table(TAMA,"/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_TAMA_2021.genes.out.anno", sep="\t", na="", row.names=F, quote=F )
+
+
+#long
+EUR<-read.csv("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_EUR_2021_long.genes.out", sep="")
+EUR<-merge(EUR, genes[,c(1,6)], by.x="GENE", by.y="V1")
+colnames(EUR)[10]<-"HGNC_code"
+write.table(EUR,"/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_EUR_2021_long.genes.out.anno", sep="\t", na="", row.names=F, quote=F )
+
+LAT<-read.csv("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_LAT_2021_long.genes.out", sep="")
+LAT<-merge(LAT, genes[,c(1,6)], by.x="GENE", by.y="V1")
+colnames(LAT)[10]<-"HGNC_code"
+write.table(LAT,"/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_LAT_2021_long.genes.out.anno", sep="\t", na="", row.names=F, quote=F )
+
+AFR<-read.csv("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_AFR_2021_long.genes.out", sep="")
+AFR<-merge(AFR, genes[,c(1,6)], by.x="GENE", by.y="V1")
+colnames(AFR)[10]<-"HGNC_code"
+write.table(AFR,"/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_AFR_2021_long.genes.out.anno", sep="\t", na="", row.names=F, quote=F )
+
+EAS<-read.csv("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_EAS_2021_long.genes.out", sep="")
+EAS<-merge(EAS, genes[,c(1,6)], by.x="GENE", by.y="V1")
+colnames(EAS)[10]<-"HGNC_code"
+write.table(EAS,"/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_EAS_2021_long.genes.out.anno", sep="\t", na="", row.names=F, quote=F )
+
+TAMA<-read.csv("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_TAMA_long_2021.genes.out", sep="")
+TAMA<-merge(TAMA, genes[,c(1,6)], by.x="GENE", by.y="V1")
+colnames(TAMA)[10]<-"HGNC_code"
+write.table(TAMA,"/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_TAMA_2021_long.genes.out.anno", sep="\t", na="", row.names=F, quote=F )
+
+
+```
+
+```{r}
+poplist<-c("AFR","EAS","EUR","LAT","TAMA")
+for (POP in poplist){
+  magma<-read.table(paste0("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_",POP,"_2021_long.genes.out.anno"), header = T)
+  magma<-magma[which(magma$P<=0.0000025),]
+  colnames(magma)<-c("GENE",paste0("CHR_",POP),paste0("START_",POP),paste0("STOP_",POP),paste0("NSNPS_",POP),paste0("NPARAM_",POP),paste0("N_",POP),paste0("ZSTAT_",POP),paste0("P_",POP),paste0("HGNC_code_",POP))
+  assign(POP,magma)
+  }
+
+merged<- merge(AFR, EAS, by="GENE", all=T)
+merged<- merge(merged, EUR, by="GENE", all=T)
+merged<- merge(merged, LAT, by="GENE", all=T)
+merged<- merge(merged, TAMA, by="GENE", all=T)
+
+write.table(merged, "/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_ALL_2021_long.genes.out.anno.txt", row.names = F, sep="\t", na="", quote = F)
+
+magma<-read.delim("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_ALL_2021_long.genes.out.anno.txt")
+magma[magma==""]= NA
+magma$CHR<-NA
+magma$START<-NA
+magma$STOP<-NA
+magma$HGNC_code<-NA
+
+for(pop in poplist){
+magma$CHR[is.na(magma$CHR)]=magma[is.na(magma$CHR),paste0("CHR_",pop)]
+magma$START[is.na(magma$START)]=magma[is.na(magma$START),paste0("START_",pop)]
+magma$STOP[is.na(magma$STOP)]=magma[is.na(magma$STOP),paste0("STOP_",pop)]
+magma$HGNC_code[is.na(magma$HGNC_code)]=magma[is.na(magma$HGNC_code),paste0("HGNC_code_",pop)]
+}
+
+magma$CHR[which(magma$CHR=="X")]=23
+magma$CHR<-as.numeric(magma$CHR)
+library(GenomicRanges)
+
+final_list<-read.delim("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/GWAS_results/4_tables/full_loci_summary_1jun2022_cojo.txt")
+final_list$id<-row.names(final_list)
+
+magma$id<-row.names(magma)
+
+final_list_gr<-GenomicRanges::GRanges(seqnames = final_list$chr, ranges = IRanges(start = final_list$start, end = final_list$end, names=final_list$id))
+magma_gr<-GenomicRanges::GRanges(seqnames = magma$CHR, ranges = IRanges(start = magma$START, end =  magma$STOP, names=final_list$id))
+
+overlap_list<-findOverlaps(final_list_gr, magma_gr, type = "any", select = "all")
+
+overlap_list<-as.data.frame(overlap_list)
+
+merged<-merge(merge(final_list, overlap_list, by.x="id", by.y="queryHits", all.x=T), magma, by.x="subjectHits",by.y="id", all.x=T)
+
+
+
+merged2<-merged[,c("locus","HGNC_code")]
+
+library(tidyverse)
+merged3<-merged2 %>% arrange( HGNC_code) %>% nest(new_col = HGNC_code) %>%group_by(locus) %>% mutate(new_col2 = paste(unlist(new_col), collapse = " , ")) %>% select(locus,new_col2)
+colnames(merged3)<-c("locus", "magma_sig_genes")
+
+final_list<-merge(final_list, merged3, by="locus")
+final_list$magma_sig_genes[which(final_list$magma_sig_genes=="NA")]=NA
+final_list$id=NULL
+
+write.table(final_list, "/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/GWAS_results/4_tables/full_loci_summary_1jun2022_cojo_magma.txt", quote=F, sep="\t", na="", row.names =F)
+
+## ignored ones ##
+merged<-merge(merge(final_list, overlap_list, by.x="id", by.y="queryHits", all=T), magma, by.x="subjectHits",by.y="id", all=T)
+ignored<-merged[is.na(merged$id),]
+ignored<-ignored[,61:64]
+
+```
+
+
+```{r}
+poplist<-c("AFR","EAS","EUR","LAT","TAMA")
+for (POP in poplist){
+  magma<-read.table(paste0("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_",POP,"_2021_long_female.genes.out.anno"), header = T)
+  magma<-magma[which(magma$P<=0.0000025),]
+  colnames(magma)<-c("GENE",paste0("CHR_",POP),paste0("START_",POP),paste0("STOP_",POP),paste0("NSNPS_",POP),paste0("NPARAM_",POP),paste0("N_",POP),paste0("ZSTAT_",POP),paste0("P_",POP),paste0("HGNC_code_",POP))
+  assign(POP,magma)
+  }
+
+merged<- merge(AFR, EAS, by="GENE", all=T)
+merged<- merge(merged, EUR, by="GENE", all=T)
+merged<- merge(merged, LAT, by="GENE", all=T)
+merged<- merge(merged, TAMA, by="GENE", all=T)
+
+write.table(merged, "/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_ALL_2021_long_female.genes.out.anno.txt", row.names = F, sep="\t", na="", quote = F)
+
+magma<-read.delim("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_ALL_2021_long_female.genes.out.anno.txt")
+magma[magma==""]= NA
+magma$CHR<-NA
+magma$START<-NA
+magma$STOP<-NA
+magma$HGNC_code<-NA
+
+for(pop in poplist){
+magma$CHR[is.na(magma$CHR)]=magma[is.na(magma$CHR),paste0("CHR_",pop)]
+magma$START[is.na(magma$START)]=magma[is.na(magma$START),paste0("START_",pop)]
+magma$STOP[is.na(magma$STOP)]=magma[is.na(magma$STOP),paste0("STOP_",pop)]
+magma$HGNC_code[is.na(magma$HGNC_code)]=magma[is.na(magma$HGNC_code),paste0("HGNC_code_",pop)]
+}
+
+magma$CHR[which(magma$CHR=="X")]=23
+magma$CHR<-as.numeric(magma$CHR)
+library(GenomicRanges)
+
+final_list<-read.delim("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/loci_list/female_loci_summary_1jun2022.txt")
+final_list$id<-row.names(final_list)
+
+magma$id<-row.names(magma)
+
+final_list_gr<-GenomicRanges::GRanges(seqnames = final_list$chr, ranges = IRanges(start = final_list$start, end = final_list$end, names=final_list$id))
+magma_gr<-GenomicRanges::GRanges(seqnames = magma$CHR, ranges = IRanges(start = magma$START, end =  magma$STOP, names=magma$id))
+
+overlap_list<-findOverlaps(final_list_gr, magma_gr, type = "any", select = "all")
+
+overlap_list<-as.data.frame(overlap_list)
+
+merged<-merge(merge(final_list, overlap_list, by.x="id", by.y="queryHits", all.x=T), magma, by.x="subjectHits",by.y="id", all.x=T)
+
+merged2<-merged[,c("locus","HGNC_code")]
+
+library(tidyverse)
+merged3<-merged2 %>% arrange( HGNC_code) %>% nest(new_col = HGNC_code) %>%group_by(locus) %>% mutate(new_col2 = paste(unlist(new_col), collapse = " , ")) %>% select(locus,new_col2)
+colnames(merged3)<-c("locus", "magma_sig_genes")
+
+final_list<-merge(final_list, merged3, by="locus")
+final_list$magma_sig_genes[which(final_list$magma_sig_genes=="NA")]=NA
+final_list$id=NULL
+
+write.table(final_list, "/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/GWAS_results/4_tables/female_loci_summary_1jun2022_magma.txt", quote=F, sep="\t", na="", row.names =F)
+
+
+final_list<-read.delim("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/loci_list/female_loci_summary_1jun2022.txt")
+final_list$id<-row.names(final_list)
+merged<-merge(merge(final_list, overlap_list, by.x="id", by.y="queryHits", all=T), magma, by.x="subjectHits",by.y="id", all=T)
+
+
+ignored<-merged[is.na(merged$id),]
+ignored<-ignored[,61:64]
+write.table(ignored, "/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/GWAS_results/4_tables/female_magma_outside_loci.txt", quote=F, sep="\t", na="", row.names =F)
+
+
+
+
+poplist<-c("AFR","EAS","EUR","LAT","TAMA")
+for (POP in poplist){
+  magma<-read.table(paste0("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_",POP,"_2021_long_male.genes.out.anno"), header = T)
+  magma<-magma[which(magma$P<=0.0000025),]
+  colnames(magma)<-c("GENE",paste0("CHR_",POP),paste0("START_",POP),paste0("STOP_",POP),paste0("NSNPS_",POP),paste0("NPARAM_",POP),paste0("N_",POP),paste0("ZSTAT_",POP),paste0("P_",POP),paste0("HGNC_code_",POP))
+  assign(POP,magma)
+  }
+
+merged<- merge(AFR, EAS, by="GENE", all=T)
+merged<- merge(merged, EUR, by="GENE", all=T)
+merged<- merge(merged, LAT, by="GENE", all=T)
+merged<- merge(merged, TAMA, by="GENE", all=T)
+
+write.table(merged, "/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_ALL_2021_long_male.genes.out.anno.txt", row.names = F, sep="\t", na="", quote = F)
+
+magma<-read.delim("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_ALL_2021_long_male.genes.out.anno.txt")
+magma[magma==""]= NA
+magma$CHR<-NA
+magma$START<-NA
+magma$STOP<-NA
+magma$HGNC_code<-NA
+
+for(pop in poplist){
+magma$CHR[is.na(magma$CHR)]=magma[is.na(magma$CHR),paste0("CHR_",pop)]
+magma$START[is.na(magma$START)]=magma[is.na(magma$START),paste0("START_",pop)]
+magma$STOP[is.na(magma$STOP)]=magma[is.na(magma$STOP),paste0("STOP_",pop)]
+magma$HGNC_code[is.na(magma$HGNC_code)]=magma[is.na(magma$HGNC_code),paste0("HGNC_code_",pop)]
+}
+
+magma$CHR[which(magma$CHR=="X")]=23
+magma$CHR<-as.numeric(magma$CHR)
+library(GenomicRanges)
+
+final_list<-read.delim("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/loci_list/male_loci_summary_1jun2022.txt")
+final_list$id<-row.names(final_list)
+
+magma$id<-row.names(magma)
+
+final_list_gr<-GenomicRanges::GRanges(seqnames = final_list$chr, ranges = IRanges(start = final_list$start, end = final_list$end, names=final_list$id))
+magma_gr<-GenomicRanges::GRanges(seqnames = magma$CHR, ranges = IRanges(start = magma$START, end =  magma$STOP, names=magma$id))
+
+overlap_list<-findOverlaps(final_list_gr, magma_gr, type = "any", select = "all")
+
+overlap_list<-as.data.frame(overlap_list)
+
+merged<-merge(merge(final_list, overlap_list, by.x="id", by.y="queryHits", all.x=T), magma, by.x="subjectHits",by.y="id", all.x=T)
+
+
+
+merged2<-merged[,c("locus","HGNC_code")]
+
+library(tidyverse)
+merged3<-merged2 %>% arrange( HGNC_code) %>% nest(new_col = HGNC_code) %>%group_by(locus) %>% mutate(new_col2 = paste(unlist(new_col), collapse = " , ")) %>% select(locus,new_col2)
+colnames(merged3)<-c("locus", "magma_sig_genes")
+
+final_list<-merge(final_list, merged3, by="locus")
+final_list$magma_sig_genes[which(final_list$magma_sig_genes=="NA")]=NA
+final_list$id=NULL
+
+write.table(final_list, "/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/GWAS_results/4_tables/male_loci_summary_1jun2022_magma.txt", quote=F, sep="\t", na="", row.names =F)
+
+merged<-merge(merge(final_list, overlap_list, by.x="id", by.y="queryHits", all=T), magma, by.x="subjectHits",by.y="id", all=T)
+
+ignored<-merged[is.na(merged$id),]
+ignored<-ignored[,61:64]
+write.table(ignored, "/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/GWAS_results/4_tables/male_magma_outside_loci.txt", quote=F, sep="\t", na="", row.names =F)
+```
+
+
+
+### Phenoscanner genes
+```{r, eval=F}
+magma<-read.delim("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_ALL_2021_long.genes.out.anno.txt")
+
+library(phenoscanner)
+result_file<-as.data.frame(matrix(ncol = 32))
+colnames(result_file)<-c("gene","rsid","hg19_coordinates","hg38_coordinates","a1","a2","afr","amr","eas","eur","sas","consequence","protein_position","amino_acids","ensembl","hgnc","trait","efo","study","pmid","ancestry","year","beta","se","p","direction","n","n_cases","n_controls","n_studies","unit","dataset")
+
+gene_groups <- seq(from = 1, to = nrow(magma), by = 10)
+for(genes in 1:length(gene_groups)){
+res <- phenoscanner(genequery = magma$HGNC_code[(gene_groups[genes]:(gene_groups[genes]+9))], pvalue = 0.00000005)
+result_file<-rbind(result_file, res$results)
+}
+
+result_file<-result_file[!duplicated(result_file),]
+result_file$n_cases<-as.numeric(result_file$n_cases)
+result_file2<-result_file[which(is.na(result_file$n_cases) |result_file$n_cases==0|result_file$n_cases>=100),] #remove low cases from results
+
+write.table(result_file,"/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_2021_phenoscanner.genes.out", quote = F, sep="\t", na="", row.names=F)
+write.table(result_file2,"/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_2021_phenoscanner_filtered.genes.out", quote = F, sep="\t", na="", row.names=F)
+
+t<-result_file2[,c("gene","trait")]
+t<-unique(t)
+```
+
+
+
+```{r}
+phenoscanner_res<-read.delim("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_2021_phenoscanner_filtered.genes.out")
+
+t<-phenoscanner_res[,c("gene","trait")]
+t<-unique(t)
+
+t3<-t %>% arrange(trait) %>% nest(new_col = trait) %>% group_by(gene) %>% mutate(new_col2 = paste(unlist(new_col), collapse = ", ")) %>% select(gene,new_col2)
+colnames(t3)<-c("gene","phenoscanner_associations")
+
+magma<-read.delim("/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_ALL_2021_long.genes.out.anno.txt")
+magma[magma==""]= NA
+magma$CHR<-NA
+magma$START<-NA
+magma$STOP<-NA
+magma$HGNC_code<-NA
+
+for(pop in poplist){
+magma$CHR[is.na(magma$CHR)]=magma[is.na(magma$CHR),paste0("CHR_",pop)]
+magma$START[is.na(magma$START)]=magma[is.na(magma$START),paste0("START_",pop)]
+magma$STOP[is.na(magma$STOP)]=magma[is.na(magma$STOP),paste0("STOP_",pop)]
+magma$HGNC_code[is.na(magma$HGNC_code)]=magma[is.na(magma$HGNC_code),paste0("HGNC_code_",pop)]
+}
+magma2<-merge(magma,t3, by.x="HGNC_code", by.y="gene",all.x=T)
+
+write.table(magma2,"/Volumes/biochemistry/Lab_groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/Magma/GWAS_ALL_2021_long.genes.out.anno.phenoscanner.txt", quote = F, sep="\t", na="", row.names=F)
+
+```
