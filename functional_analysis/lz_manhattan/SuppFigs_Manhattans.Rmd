@@ -1,0 +1,318 @@
+---
+title: "SuppFigs_Manhattans"
+author: "Tanya Major"
+date: "First Run: 3rd Oct 2022; Updated: `r format(Sys.Date(), '%dth %b %Y')`"
+output:
+  rmarkdown::html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: false
+    code_folding: "hide"
+---
+
+```{r markdown_setup, echo = FALSE, message = FALSE}
+# Set options you want to apply to all chunks here
+knitr::opts_chunk$set(cache = TRUE, tidy = TRUE, echo = TRUE, comment = "", tidy.opts = list(width.cutoff = 100), message = FALSE)
+options(width = 400)
+options(knitr.table.format = "html")
+```
+
+```{r set_workingdir, echo = FALSE}
+# this sets the markdown document directory to the R project directory, not the directory the markdown is saved in (eg. can save markdown in project/docs, but run markdown from project/)
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+```
+
+**_Working Directory: `r getwd()`_**
+
+<style>
+body {
+text-align: justify
+}
+</style>
+
+```{r load_libraries, message = FALSE}
+# for markdown formatting
+library(formatR)
+library(kableExtra)
+
+# for project
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+library(Manu)
+library(png)
+```
+
+
+```{r GWAS_colourscheme}
+# set colour palette (Tui + two Kereru)
+# for outlines, things in black etc use "#21282F"
+# when a plot only needs 1/2 colours use the first ones in the list this creates
+## won't work on server
+gwas_palette <- c(get_pal("Tui")[1:5], "#B865A1", "#6AA086")
+gwas_palette <- sort(gwas_palette)
+
+## use this version on server
+# gwas_palette <- c("#115896", "#4C4C53", "#6AA086", "#7ACCD7", "#7C6C65", "#B865A1", "#BA2F00")
+```
+
+<br>
+
+```{r load_loci_data}
+# load saved files when repeating plotting steps
+save_date <- "9Dec2022"
+loci_summary <- list()
+
+for(set in c("full", "male", "female")){
+  loci_summary[[set]] <- read.delim(paste0("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/loci_list/", set, "_loci_summary_updated_", save_date, "_withLD_withBroad.txt"), header = TRUE)
+  loci_summary[[paste0(set, "_SNPs")]] <- read.delim(paste0("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/loci_list/", set, "_indepSNP_summary_updated_", save_date, "_withBroad.txt"), header = TRUE)
+}
+rm(set, save_date)
+```
+
+
+A Manhattan plot for each ancestry-/sex-specific GWAS needs to be created for inclusion in the Supplemental Figures.
+
+```{r load_GWAS_results}
+manhattan_inputs <- list()
+
+pop = "AFR"
+
+#for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+  for(set in c("full", "male", "female")){
+    manhattan_inputs[[paste(pop, set, sep = "_")]] <- read.delim(paste0("results/GWAS_sumstats/", pop, "_", set, "_clean_rsid.nfiltered.biallelic.LZ"), header = TRUE)
+    if(pop == "TAMA"){
+      names(manhattan_inputs[[paste(pop, set, sep = "_")]])[3] <- "BP"
+    }
+  }
+  rm(set)
+#}
+rm(pop)
+```
+
+
+
+
+
+### Manhattan Plots
+
+To make the Manhattan plot more customisable a bespoke `ggplot2` script is being used. Adapted from <https://r-graph-gallery.com/101_Manhattan_plot.html>
+
+
+Aiming for full, male, and female versions stacked on top of each other, without duplicated x-axis info. Each Manhattan to have a 'significant loci" track above the plot (like LocusZooms). And not too tall for each.
+
+
+Step 1: prep the data
+
+
+  + reduce data size by filtering out bottom ~20% of SNPs (~10% for TAMA as already less SNPs)
+  + create column for x-axis plotting & new x-axis label positions
+  
+
+```{r prep_GWAS_results}
+## reduce size of data to be plotted - filter out most non-significant
+pop = "AFR"
+#for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+  for(set in c("full", "male", "female")){
+    if(pop == "TAMA"){
+      # remove bottom 10% SNPs
+      gwas_data <- manhattan_inputs[[paste(pop, set, sep = "_")]] %>%
+        filter(logBF > -1)
+    } else{
+      # remove bottom 20% SNPs
+      gwas_data <- manhattan_inputs[[paste(pop, set, sep = "_")]] %>%
+        filter(log10P > 0.1)
+    }
+    # save reduced file
+    manhattan_inputs[[paste(pop, set, sep = "_")]] <- gwas_data
+    rm(gwas_data)
+  }
+  rm(set)
+#}
+rm(pop)
+    
+
+
+## create extra columns & conversion factors for plotting
+pop = "AFR"
+#for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+  for(set in c("full", "male", "female")){
+    gwas_data <- manhattan_inputs[[paste(pop, set, sep = "_")]]
+    # create column for manhattan x-axis
+    gwas_data <- gwas_data %>%
+      # compute chromosome size
+      group_by(CHR) %>%
+      summarise(CHR_length = max(BP) + 1000) %>%
+      # calculate cumulative position of each chromosome
+      mutate(total = cumsum(CHR_length) - CHR_length) %>%
+      select(-CHR_length) %>%
+      # add this info to the initial dataset
+      left_join(gwas_data, ., by = c("CHR" = "CHR")) %>%
+      # add a cumulative position of each SNP
+      arrange(CHR, BP) %>%
+      mutate(BPplot = BP + total)
+    
+    position_convfactors <- gwas_data %>%
+      select(CHR, total) %>%
+      distinct()
+    
+    # convert chr 23 label to X and factorise variable
+    gwas_data$CHR[gwas_data$CHR == 23] <- "X"
+    gwas_data <- gwas_data %>%
+      mutate(CHR = factor(CHR, levels = c(1:22, "X")))
+    
+    # save x-axis labels
+    axis_labels <- gwas_data %>%
+      group_by(CHR) %>%
+      summarise(center = (max(BPplot) + min(BPplot)) / 2)
+
+    # save files for input into manhattan plots
+    manhattan_inputs[[paste(pop, set, sep = "_")]] <- gwas_data
+    manhattan_inputs[[paste(pop, set, "conversions", sep = "_")]] <- position_convfactors
+    manhattan_inputs[[paste(pop, set, "axis", sep = "_")]] <- axis_labels
+
+    rm(gwas_data, position_convfactors, axis_labels)
+  }
+  rm(set)
+#}
+rm(pop)
+```
+
+
+  + Create one plot per ancestry
+  
+    - full, male, and female stacked
+    - significant loci indicators above ... each plot? 
+
+
+
+
+```{r create_manhattans}
+# full cohort - points in blue/brown-grey
+# male cohort - points in grey/brown-grey
+# female cohort - points in green/brown-grey
+colours_set <- list(full = gwas_palette[1], male = gwas_palette[2], female = gwas_palette[3])
+
+tidy_titles <- list(full = "Full (Combined) Cohort", male = "Male-Only Cohort", female = "Female-Only Cohort")
+
+## stacked manhattan plot, with significant loci flagged
+pop = "AFR"
+#for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+
+  plot_list <- list()
+  # make manhattan plot per sex and save to list
+  for(set in c("full", "male", "female")){
+    colourA <- colours_set[[set]]
+    
+    # required data
+    gwas_data <- manhattan_inputs[[paste(pop, set, sep = "_")]]
+    axis_labels <- manhattan_inputs[[paste(pop, set, "axis", sep = "_")]]
+    conv_factors <- manhattan_inputs[[paste(pop, set, "conversions", sep = "_")]]
+    
+    if(pop == "TAMA"){
+      # make TAMA dataset names match non-TAMA names
+      names(gwas_data) <- gsub(names(gwas_data), pattern = "logBF", replacement = "log10P")
+      min_log = -1
+      sig_line = 6
+      y_label_tidy = expression(log[10]~~`Baye's`~Factor)
+    } else{
+      min_log = 0
+      y_label_tidy = expression(-log[10]~`(`~italic(P)~`)`)
+      sig_line = -log10(5e-8)
+    }
+    
+    # find loci with logP > 100 
+    very_significant <- gwas_data %>%
+      filter(log10P > 100)
+    
+    if(nrow(very_significant) >= 1){
+      very_significant <- very_significant %>%
+        mutate(CHR2 = ifelse(BP > 88000000 & CHR == 4, "4A", as.character(CHR))) %>%
+        group_by(CHR2) %>%
+        summarise(center = (max(BPplot) + min(BPplot)) / 2) %>%
+        mutate(CHR = as.factor(ifelse(CHR2 == "4A", "4", CHR2))) %>%
+        mutate(maxP = 100)
+    }
+
+    # make manhattan plot
+    manhattan_plot <- gwas_data %>%
+      filter(log10P <= 97) %>%
+      # start creating base manhattan
+      ggplot(., aes(x = BPplot, y = log10P)) +     
+        geom_point(aes(color = CHR), size = 1) + 
+        scale_color_manual(values = rep(c(colourA, "#A59B97"), times = 23)) +
+        scale_x_continuous(limits = c(min(gwas_data$BPplot), max(gwas_data$BPplot)), label = axis_labels$CHR, breaks = axis_labels$center, expand = c(0.02, 0.02)) +
+      # remove space between plot area and x axis + expand to make room for loci flags below
+        scale_y_continuous(limits = c(min_log, 115), breaks = seq(0, 100, 25), minor_breaks = seq(0, 100, 12.5), expand = c(0.01, 1)) +   
+       # make plot look like others in paper
+        theme_light(base_size = 14) +     
+        theme( 
+          legend.position = "none",
+          panel.border = element_blank(),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.x = element_blank(),
+          axis.line = element_line(color = "grey60"),
+          axis.ticks = element_line(color = "grey60")
+        ) +
+        xlab(label = "Chromosome") +
+        ylab(label = y_label_tidy) +
+      # add significance cut-off line
+        geom_hline(yintercept = sig_line, linetype = "solid", color = gwas_palette[7], linewidth = 1) +     
+      # expand plot margins so aligns with loci track
+        theme(
+          plot.margin = margin(t = 5.5, r = 5.5, b = 5.5, l = 10, unit = "pt")
+        )
+    
+    # add triangle to indicate peaks go > 100 on significance scale
+    if(nrow(very_significant) >= 1){
+      manhattan_plot <- manhattan_plot +
+        geom_point(data = very_significant, aes(x = center, y = maxP, color = CHR), size = 2, shape = 17)
+    }
+
+    
+     ## make locus highlight track
+    loci_positions <- loci_summary[[set]]
+    loci_positions <- loci_positions[loci_positions[, pop] != "", ]
+    
+    # convert loci positions to plot positions
+    loci_positions <- merge(loci_positions, conv_factors, by.x = "chr", by.y = "CHR", all.x = TRUE)
+    loci_positions$chr[loci_positions$chr == 23] <- "X"
+    loci_positions <- loci_positions %>%
+      mutate(chr = factor(chr, levels = c(1:22, "X"))) %>%
+      # expand width so smaller bands are visible at Manhattan scale
+      mutate(startPlot = start + total - 50000) %>%
+      mutate(endPlot = end + total + 50000) %>%
+      mutate(Ypos = 115)
+
+    # double plot every line to make bolder
+    loci_positions <- rbind(loci_positions, loci_positions)
+    
+    manhattan_plot <- manhattan_plot +
+      # make significant loci tracks for above manhattan
+        geom_segment(data = loci_positions, aes(x = startPlot, xend = endPlot, y = Ypos, yend = Ypos, colour = SEX), size = 8, linetype = "solid", alpha = 1) +
+        scale_fill_manual(values = rep(gwas_palette[7], times = nrow(loci_positions))) +
+        ggtitle(label = "", subtitle = tidy_titles[[set]])
+    
+    
+    # save manhattan plot to list
+    plot_list[[set]] <- manhattan_plot
+    rm(manhattan_plot, very_significant, min_log, sig_line, y_label_tidy, loci_positions, conv_factors, axis_labels, gwas_data, colourA)
+
+  }
+  rm(set)
+  
+  # save together
+    today <- format(Sys.Date(), "%d%b%Y")
+    png(filename = paste0("results/manhattans/ManhattanStack_", pop, "_", today, ".png"), width = 12, height = 12, units = "in", res = 300)
+    grid.arrange(plot_list[["full"]],
+                 plot_list[["male"]],
+                 plot_list[["female"]],
+                 layout_matrix = matrix(c(1:3), ncol = 1), heights = c(4, 4, 4))
+    dev.off()
+    
+    rm(plot_list, today)
+
+#}
+rm(pop, colours_set, tidy_titles)
+```
+

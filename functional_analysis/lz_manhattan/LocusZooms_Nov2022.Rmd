@@ -1,0 +1,609 @@
+---
+title: "Major GWAS LocusZooms"
+author: "Tanya Major"
+date: "First Run: 4th Nov 2021; Updated: `r format(Sys.Date(), '%dth %b %Y')`"
+output:
+  rmarkdown::html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: false
+    code_folding: "hide"
+---
+
+```{r markdown_setup, echo = FALSE, message = FALSE}
+# Set options you want to apply to all chunks here
+knitr::opts_chunk$set(cache = TRUE, tidy = TRUE, echo = TRUE, comment = "", tidy.opts = list(width.cutoff = 100), message = FALSE)
+options(width = 400)
+options(knitr.table.format = "html")
+```
+
+```{r set_workingdir, echo = FALSE}
+# this sets the markdown document directory to the R project directory, not the directory the markdown is saved in (eg. can save markdown in project/docs, but run markdown from project/)
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+```
+
+**_Working Directory: `r getwd()`_**
+
+<style>
+body {
+text-align: justify
+}
+</style>
+
+```{r load_libraries}
+# for markdown formatting
+library(formatR)
+library(kableExtra)
+library(DT)
+
+# for project
+library(tidyverse)
+source("/Volumes/biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Tanya/Projects/scripts/LocusZooms/functions/locus_zoom.R")
+```
+
+<br>
+
+Required files:
+
+Per pop (AFR, EAS, EUR, LAT, TAMA), per sex (full, male, female)
+  
+  
+  + Locus list & independent SNPs
+  + MAGMA results
+  + GWAS results
+  
+Make plots region based (do an extra +/- 50kb around region?), labelling all independent SNPs within the region, showing all protein-coding genes & RNAs, with MAGMA p-value highlighting.
+
+Make title region based. Include '(signal A)' notation.
+
+
+
+
+##### MAGMA files 
+
+**Created by Ruth for all Gencode genes**
+
+```{r load_magma_files}
+MAGMA_results <- list()
+for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+  for(set in c("full", "male", "female")){
+    if(set == "full"){
+      data <- read.delim(paste0("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/magma/GWAS_", pop, "_2021_long.genes.out.anno"), header = TRUE, stringsAsFactors = FALSE)
+    } else{
+      data <- read.delim(paste0("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/magma/GWAS_", pop, "_2021_long_", set, ".genes.out.anno"), header = TRUE, stringsAsFactors = FALSE)
+    }
+    names(data)[10] <- "Gene"
+    # remove duplicate gene names (same common name, different ensembl name)
+    data <- data[!duplicated(data$Gene), ]
+    MAGMA_results[[paste(pop, set, sep = "_")]] <- data
+  }
+  rm(set, data)
+}
+rm(pop)
+```
+
+
+##### Independent SNPs and loci information
+
+**Note (29-Nov-2022): Originally this code included the creation of the `loci_summary` and `indepSNP_summary` files. These have been so edited since then the code was removed.**
+
+```{r load_final_loci}
+# load in loci info
+save_date <- "30Sept2022"
+
+loci_summary <- list()
+for(set in c("full", "male", "female")){
+  loci_summary[[set]] <- read.delim(paste0("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/loci_list/", set, "_loci_summary_updated_", save_date, "_withLD.txt"), header = TRUE)
+  loci_summary[[paste0(set, "_SNPs")]] <- read.delim(paste0("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/loci_list/", set, "_indepSNP_summary_updated_", save_date, ".txt"), header = TRUE)
+}
+rm(set, save_date)
+
+loci_summary[["broad_loci"]] <- read.delim("/Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/loci_clumping/combinedlocitable_broad.txt", header = TRUE)
+```
+
+
+Add broad boundaries to loci files, so can plot all plots based on broad boundaries, but label based on GWAS-specific boundaries.
+
+
+```{r add_broad_boundaries}
+for(set in c("full", "male", "female")){
+  broad_data <- loci_summary[["broad_loci"]]
+  broad_data$locus_broad <- paste0("chr", broad_data$chr_broad, "_", round(broad_data$start_broad / 1000000, digits = 2), "_", round(broad_data$end_broad / 1000000, digits = 2), "MB")
+  broad_data <- broad_data[, c("sort_column", "locus_broad", "chr_broad", "start_broad", "end_broad", paste0("locus_", set))]
+  
+  ## locus file
+  loci_data <- loci_summary[[set]]
+  column_order <- names(loci_data)
+  
+  loci_data <- merge(broad_data, loci_data, by.x = paste0("locus_", set), by.y = "locus", all.y = TRUE)
+  names(loci_data)[1] <- "locus"
+  
+  # reset file order
+  loci_data <- loci_data[order(loci_data$sort_column), ]
+  loci_data <- loci_data[, c("sort_column", "locus_broad", "chr_broad", "start_broad", "end_broad", column_order)]
+  
+  loci_summary[[set]] <- loci_data
+  
+  ## SNP file
+  loci_snps <- loci_summary[[paste0(set, "_SNPs")]]
+  column_order <- names(loci_snps)
+
+  loci_snps <- merge(broad_data[, c("sort_column", "locus_broad", paste0("locus_", set))], loci_snps, by.x = paste0("locus_", set), by.y = "locus", all.y = TRUE)
+  names(loci_snps)[1] <- "locus"
+  
+  # reset file order
+  loci_snps <- loci_snps[order(loci_snps$sort_column), ]
+  loci_snps <- loci_snps[, c("sort_column", "locus_broad", column_order)]
+  
+  loci_summary[[paste0(set, "_SNPs")]] <- loci_snps
+  
+  rm(loci_data, loci_snps, broad_data, column_order)
+}
+rm(set)
+```
+
+
+
+
+
+##### GWAS files
+
+**Created by Riku**
+
+The GWAS files are very large and not all of their information is needed for creating the locus zooms. Therefore files were reduced to only the relevant columns and data.
+
+Note (29-Nov-2022): base this on the broad locus boundaries created in November 2022, `/Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/loci_clumping/broad-loci_reclump_Nov2022.txt`, +/- 50kb 
+
+```{bash reduce_file_size, eval = FALSE}
+# start with .LZ files, which only include useful columns (CHR BP SNP P logP/logBF)
+
+# keep all SNPs within the locus boundaries (+/- 50kb)
+tail -n+2 /Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/loci_clumping/broad-loci_reclump_Nov2022.txt > /Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/locuszooms/broad-loci_reclump_Nov2022.tmp
+
+while read -r line;
+  do
+    pop=$(echo "$line" | cut -f5)
+    set=$(echo "$line" | cut -f6)
+    locus=$(echo "$line" | cut -f1)
+    chr=$(echo "$line" | cut -f2)
+    start=$(echo "$line" | cut -f3)
+    end=$(echo "$line" | cut -f4)
+    
+    # add +/- 50kb to boundaries
+    start=$((${start}-50000))
+    end=$((${end}+50000))
+    
+    # extract SNPs in boundaries
+    awk -v CHR="${chr}" -v START="${start}" -v STP="${end}" '{if (NR == 1 || $1 == CHR && $2 >= START && $2 <= STP) {print} }' /Volumes/archive/merrimanlab/major_gwas_paper_archive/results_meta_analysis/${pop}_meta_${set}_clean_rsid.nfiltered.biallelic.LZ > /Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/locuszooms/${pop}/${pop}_meta_${set}_${locus}_clean_rsid.nfiltered.biallelic.LZ.tmp
+  done < /Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/locuszooms/broad-loci_reclump_Nov2022.tmp
+
+# smash all the temporary locus boundary files together
+for pop in $(echo AFR EAS EUR LAT TAMA); 
+  do
+    for set in $(echo full male female);
+      do
+        loop=0
+        for file in $(ls /Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/locuszooms/${pop}/${pop}_meta_${set}_chr*_clean_rsid.nfiltered.biallelic.LZ.tmp);
+          do
+    loop=$((${loop}+1))
+            if [ "${loop}" = 1 ]; then
+              cp ${file} /Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/locuszooms/${pop}/${pop}_meta_${set}_clean_rsid.nfiltered.biallelic.LZ.reduced
+            else
+              tail -n+2 ${file} >> /Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/locuszooms/${pop}/${pop}_meta_${set}_clean_rsid.nfiltered.biallelic.LZ.reduced
+            fi
+          done
+      done
+  done
+
+rm /Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/locuszooms/*/*_meta_*_chr*_clean_rsid.nfiltered.biallelic.LZ.tmp
+rm /Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/locuszooms/broad-loci_reclump_Nov2022.tmp
+```
+
+
+
+
+```{r load_GWAS_files}
+GWAS_results <- list()
+for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+  for(set in c("full", "male", "female")){
+    data <- read.table(paste0("/Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/locuszooms/", pop, "/", pop, "_meta_", set, "_clean_rsid.nfiltered.biallelic.LZ.reduced"), header = TRUE, stringsAsFactors = FALSE)
+    data <- unique(data)
+    if(pop == "TAMA"){
+      names(data)[2] <- "BP"
+    } else{
+      names(data)[5] <- "logP"
+    }
+    data <- data[order(data$CHR, data$BP), ]
+    GWAS_results[[paste(pop, set, sep = "_")]] <- data
+    rm(data)
+  }
+  rm(set)
+}
+rm(pop)
+```
+
+
+#### Create LocusZooms
+
+```{r load_gene_info}
+gencode_genes <- read.delim("/Volumes/biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Tanya/Projects/scripts/LocusZooms/Gencode_GRCh37_Genes_UniqueList2021.txt", header = TRUE, stringsAsFactors = FALSE)
+# make patch of small genes in SLC2A9 region & genes with odd names in large chr6 region have no name on graph
+gencode_genes$Gene[grepl(gencode_genes$Gene, pattern = "^USP17") & gencode_genes$Coding == "proteincoding"] <- ""
+gencode_genes$Gene[grepl(gencode_genes$Gene, pattern = "^XXbac") & gencode_genes$Coding == "proteincoding"] <- ""
+gencode_genes$Gene[gencode_genes$Chrom == "chr6" & (gencode_genes$Start < 32850000 & gencode_genes$End > 25070000) & gencode_genes$Coding == "proteincoding" & grepl(gencode_genes$Gene, pattern = "-")] <- ""
+# one plot overlaps an area where there is a duplicate gene in the gencode file, keep first version for all duplicated genes
+gencode_genes <- gencode_genes[!duplicated(gencode_genes$Gene), ]
+```
+
+
+```{r make_tidy_plot_headers}
+tidy_names <- list(AFR = "African", EAS = "East Asian", EUR = "European", LAT = "Latinx", TAMA = "Trans-Ancestry", male = " (Male-Only)", female = " (Female-Only)", full = "")
+
+# tidy_locus_names
+for(set in c("full", "male", "female")){
+  data <- loci_summary[[set]]
+  data <- cbind(data, do.call(rbind, strsplit(data[, "locus"], split = "_")))
+  data[, "1"] <- gsub(data[, "1"], pattern = "chr", replacement = "Chromosome ")
+  data[, "2"] <- paste0(data[, "2"], "MB")
+  data[, "4"] <- paste0(" (Signal ", data[, "4"], ")")
+  data[, "4"] <- gsub(data[, "4"], pattern = " \\(Signal chr[0-9]+\\)", replacement = "")
+  data$tidy_locus <- paste0(data[, "1"], ": ", data[, "2"], "-", data[, "3"], data[, "4"])
+  data[, c("1", "2", "3", "4")] <- NULL
+  loci_summary[[set]] <- data
+  rm(data)
+}
+rm(set)
+```
+
+
+```{r create_plots, eval = FALSE}
+for(set in c("full", "male", "female")){
+  locus_info <- loci_summary[[set]]
+  for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+    reduced_locus_info <- locus_info[, c("locus", "tidy_locus", "chr_broad", "start_broad", "end_broad", pop)]
+    reduced_locus_info <- reduced_locus_info[reduced_locus_info[, pop] != "", ]
+    input_data <- GWAS_results[[paste(pop, set, sep = "_")]]
+    input_magma <- MAGMA_results[[paste(pop, set, sep = "_")]]
+    
+    if(pop == "LAT"){
+      ld_pop = "AMR"
+    } else{
+      ld_pop = pop
+    }
+    
+    if(pop == "TAMA"){
+      nom_threshold = 4
+      sig_threshold = 6.1
+      sig_type = "logBF"
+    } else {
+      nom_threshold = -log10(1e-5)
+      sig_threshold = -log10(5e-8)
+      sig_type = "logP"
+    }
+    
+    print(paste0("Plotting: ", tidy_names[[pop]], " GWAS", tidy_names[[set]]))
+    progress_bar = txtProgressBar(min = 0, max = length(reduced_locus_info[, 1]), initial = 0) 
+
+    for(row in 1:length(reduced_locus_info[, 1])){
+      plot_title <- paste0(tidy_names[[pop]], tidy_names[[set]], " [", reduced_locus_info[row, "tidy_locus"], "]")
+      locus.zoom(data = input_data,
+                 snp = reduced_locus_info[row, pop],
+                 ignore.lead = TRUE,
+                 region = c(reduced_locus_info[row, "chr_broad"], reduced_locus_info[row, "start_broad"], reduced_locus_info[row, "end_broad"]),
+                 offset_bp = 10000,
+                 genes.data = gencode_genes,
+                 plot.title = plot_title,
+                 file.name = paste0("/Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/locuszooms/", pop, "/", set, "/", pop, "_", set, "_", reduced_locus_info[row, "locus"], "_Nov2022.jpg"),
+                 secondary.snp = reduced_locus_info[, pop],
+                 secondary.label = TRUE,
+                 genes.pvalue = input_magma,
+                 colour.genes = TRUE,
+                 population = ld_pop,
+                 nominal = nom_threshold,
+                 significant = sig_threshold,
+                 sig.type = sig_type,
+                 rsid.check = FALSE
+                )
+      setTxtProgressBar(progress_bar, row)
+      rm(plot_title)
+    }
+    close(progress_bar)
+    rm(row, reduced_locus_info, ld_pop, nom_threshold, sig_threshold, sig_type, input_data, input_magma, progress_bar)
+  }
+  rm(pop, locus_info)
+}
+rm(set)
+```
+
+
+For several regions in the Latinx GWAS the independent SNP was called using TAMA LD as there was no LD information in the 1000G AMR population. These plots were remade with TAMA LD for clarity. 
+
+
+```{r LAT-TAMA_plots, eval = FALSE}
+pop = "LAT"
+for(set in c("full", "male")){
+  locus_info <- loci_summary[[set]]
+  
+  reduced_locus_info <- locus_info[, c("locus", "tidy_locus", "chr_broad", "start_broad", "end_broad", pop)]
+  reduced_locus_info <- reduced_locus_info[reduced_locus_info[, pop] != "", ]
+  reduced_locus_info <- reduced_locus_info[reduced_locus_info$locus %in% c("chr2_52.11_52.27MB", "chr2_52.11_52.23MB", "chr4_45.13_45.29MB"), ]
+  input_data <- GWAS_results[[paste(pop, set, sep = "_")]]
+  input_magma <- MAGMA_results[[paste(pop, set, sep = "_")]]
+  
+  ld_pop = "TAMA"
+  
+  nom_threshold = -log10(1e-5)
+  sig_threshold = -log10(5e-8)
+  sig_type = "logP"
+  
+  for(row in 1:length(reduced_locus_info[, 1])){
+    plot_title <- paste0(tidy_names[[pop]], tidy_names[[set]], " [", reduced_locus_info[row, "tidy_locus"], "]^")
+    locus.zoom(data = input_data,
+               snp = reduced_locus_info[row, pop],
+               ignore.lead = TRUE,
+               region = c(reduced_locus_info[row, "chr_broad"], reduced_locus_info[row, "start_broad"], reduced_locus_info[row, "end_broad"]),
+               offset_bp = 10000,
+               genes.data = gencode_genes,
+               plot.title = plot_title,
+               file.name = paste0("/Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/locuszooms/", pop, "/", set, "/", pop, "_TAMA-LD_", set, "_", reduced_locus_info[row, "locus"], "_Nov2022.jpg"),
+               secondary.snp = reduced_locus_info[, pop],
+               secondary.label = TRUE,
+               genes.pvalue = input_magma,
+               colour.genes = TRUE,
+               population = ld_pop,
+               nominal = nom_threshold,
+               significant = sig_threshold,
+               sig.type = sig_type,
+               rsid.check = FALSE
+    )
+    rm(plot_title)
+  }
+  rm(row, reduced_locus_info, ld_pop, nom_threshold, sig_threshold, sig_type, input_data, input_magma, locus_info)
+}
+rm(set)
+```
+
+
+
+
+```{bash delete_ld_files}
+rm {AFR,EAS,EUR,AMR,TAMA}*.{log,ld}
+```
+
+
+##### Replot Fixed Loci (December 2022)
+
+```{r code_locus_edits}
+## full cohort, chr19_18.14_18.39MB & chr19_18.46_18.68MB -> chr19_18.14_18.68MB
+# loci file
+full <- loci_summary[["full"]]
+
+full[full$locus %in% c("chr19_18.14_18.39MB", "chr19_18.46_18.68MB"), c("locus", "start", "end", "width")] <- c("chr19_18.14_18.68MB_A", "chr19_18.14_18.68MB_B", rep(c(18143762, 18678516, 534754), each = 2))
+
+# SNP file
+full_SNPs <- loci_summary[["full_SNPs"]]
+
+full_SNPs[full_SNPs$locus %in% c("chr19_18.14_18.39MB", "chr19_18.46_18.68MB"), "locus"] <- rep(c("chr19_18.14_18.68MB_A", "chr19_18.14_18.68MB_B"), each = 2)
+
+## full cohort, chr12_111.24_113.97MB labelled wrong -> chr12_109.95_113.97MB
+
+full[full$locus == "chr12_111.24_113.97MB", c("locus", "start", "end", "width")] <- c("chr12_109.95_113.97MB", 109952362, 113971346, 4018984)
+
+loci_summary[["full"]] <- full
+rm(full)
+
+# SNP file
+full_SNPs[full_SNPs$locus == "chr12_111.24_113.97MB", "locus"] <- "chr12_109.95_113.97MB"
+
+loci_summary[["full_SNPs"]] <- full_SNPs
+rm(full_SNPs)
+
+
+## male cohort, chr5_129.68_130.63MB_A & chr5_130.91_131.85MB  -> chr5_129.68_131.85MB
+  # also delete chr5_129.68_130.63MB_B line, replace rs1978235 with rs79059326 (from B line), and add rs112537099 to TAMA
+# loci file
+male <- loci_summary[["male"]]
+
+male[male$locus %in% c("chr5_129.68_130.63MB_A", "chr5_130.91_131.85MB"), c("locus", "start", "end", "width")] <- c("chr5_129.68_131.85MB_A", "chr5_129.68_131.85MB_B", rep(c(129680327, 131847578, 2167251), each = 2))
+
+male <- male[male$locus != "chr5_129.68_130.63MB_B", ]
+
+male[male$TAMA == "rs1978235", c("TAMA", "EUR.ld", "TAMA.ld")] <- c("rs79059326", "rs79059326-rs34470843 r2=0.03", "rs79059326-rs34470843 r2=0")
+
+male[male$EUR == "rs112537099", c("TAMA", "nHits", "LDcategory")] <- c("rs112537099", 2, "Same SNP")
+
+# SNP file
+male_SNPs <- loci_summary[["male_SNPs"]]
+
+male_SNPs[male_SNPs$SNP %in% c("rs34470843", "rs79059326", "rs112537099"), "locus"] <- c("chr5_129.68_131.85MB_A", "chr5_129.68_131.85MB_A", "chr5_129.68_131.85MB_B")
+
+male_SNPs <- male_SNPs[male_SNPs$SNP != "rs1978235", ]
+
+male_SNPs[male_SNPs$SNP == "rs112537099", "TAMA"] <- "TAMA"
+
+
+## male cohort, chr12_53.55_53.67MB & chr12_53.74_53.96MB -> chr12_53.55_53.96MB
+# loci file
+male[male$locus %in% c("chr12_53.55_53.67MB", "chr12_53.74_53.96MB"), c("locus", "start", "end", "width")] <- c("chr12_53.55_53.96MB_A", "chr12_53.55_53.96MB_B", rep(c(53553293, 53956432, 403139), each = 2))
+
+  # extra: fix - make loci edits from full match in this file
+  male[male$locus %in% c("chr12_109.95_113.97MB", "chr19_18.13_18.68MB_A", "chr19_18.13_18.68MB_B"), "Main_GWAS_loci"] <- c("chr12_109.95_113.97MB", "chr19_18.14_18.68MB_A", "chr19_18.14_18.68MB_B")
+
+loci_summary[["male"]] <- male
+rm(male)
+
+# SNP file
+male_SNPs[male_SNPs$locus %in% c("chr12_53.55_53.67MB", "chr12_53.74_53.96MB"), "locus"] <- c("chr12_53.55_53.96MB_A", "chr12_53.55_53.96MB_B")
+
+loci_summary[["male_SNPs"]] <- male_SNPs
+rm(male_SNPs)
+
+
+## female cohort, chr11_64.21_64.63MB & chr11_65.51_65.67MB -> chr11_64.21_65.67MB
+# loci file
+female <- loci_summary[["female"]]
+
+female[female$locus %in% c("chr11_64.21_64.63MB", "chr11_65.51_65.67MB"), c("locus", "start", "end", "width")] <- c("chr11_64.21_65.67MB_A", "chr11_64.21_65.67MB_B", rep(c(64209552, 65667324, 1457772), each = 2))
+
+loci_summary[["female"]] <- female
+rm(female)
+
+# SNP file
+female_SNPs <- loci_summary[["female_SNPs"]]
+
+female_SNPs[female_SNPs$locus %in% c("chr11_64.21_64.63MB", "chr11_65.51_65.67MB"), "locus"] <- rep(c("chr11_64.21_65.67MB_A", "chr11_64.21_65.67MB_B"), each = 2)
+
+loci_summary[["female_SNPs"]] <- female_SNPs
+rm(female_SNPs)
+```
+
+
+
+```{r recreate_broad_file}
+broad_loci <- loci_summary[["full"]]
+names(broad_loci)[6:24] <- paste0(names(broad_loci)[6:24], ".full")
+
+broad_loci <- merge(broad_loci, loci_summary[["male"]], by = c("sort_column", "locus_broad", "chr_broad", "start_broad", "end_broad"), all = TRUE)
+broad_loci <- merge(broad_loci, loci_summary[["female"]], by = c("sort_column", "locus_broad", "chr_broad", "start_broad", "end_broad"), all = TRUE, suffixes = c(".male", ".female"))
+
+broad_loci <- broad_loci[order(broad_loci$sort_column), ]
+broad_loci[, c("tidy_locus.x", "tidy_locus.y", "tidy_locus")] <- NULL
+
+loci_summary[["broad_loci"]] <- broad_loci
+rm(broad_loci)
+```
+
+
+
+```{r save_locus_edits, eval = FALSE}
+save_date <- "9Dec2022"
+
+for(set in c("full", "male", "female")){
+  loci_data <- loci_summary[[set]]
+  loci_data$tidy_locus <- NULL
+  write.table(loci_data, file = paste0("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/loci_list/", set, "_loci_summary_updated_", save_date, "_withLD_withBroad.txt"), quote = FALSE, sep = "\t", na = "", row.names = FALSE)
+  rm(loci_data)
+  
+  write.table(loci_summary[[paste0(set, "_SNPs")]], file = paste0("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/loci_list/", set, "_indepSNP_summary_updated_", save_date, "_withBroad.txt"), quote = FALSE, sep = "\t", na = "", row.names = FALSE)
+}
+rm(set)
+
+# save combined file too
+write.table(loci_summary[["broad_loci"]], file = paste0("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/loci_list/COMBINED_loci_summary_updated_", save_date, "_withLD_withBroad.txt"), quote = FALSE, sep = "\t", na = "", row.names = FALSE)
+
+rm(save_date)
+```
+
+
+
+
+```{r remake_tidy_plot_headers}
+tidy_names <- list(AFR = "African", EAS = "East Asian", EUR = "European", LAT = "Latinx", TAMA = "Trans-Ancestry", male = " (Male-Only)", female = " (Female-Only)", full = "")
+
+# tidy_locus_names
+for(set in c("full", "male", "female")){
+  data <- loci_summary[[set]]
+  data <- cbind(data, do.call(rbind, strsplit(data[, "locus"], split = "_")))
+  data[, "1"] <- gsub(data[, "1"], pattern = "chr", replacement = "Chromosome ")
+  data[, "2"] <- paste0(data[, "2"], "MB")
+  data[, "4"] <- paste0(" (Signal ", data[, "4"], ")")
+  data[, "4"] <- gsub(data[, "4"], pattern = " \\(Signal chr[0-9]+\\)", replacement = "")
+  data$tidy_locus <- paste0(data[, "1"], ": ", data[, "2"], "-", data[, "3"], data[, "4"])
+  data[, c("1", "2", "3", "4")] <- NULL
+  loci_summary[[set]] <- data
+  rm(data)
+}
+rm(set)
+```
+
+
+
+
+
+
+
+
+```{r recreate_plots}
+for(set in c("full", "male", "female")){
+  locus_info <- loci_summary[[set]]
+  # reduce to edited loci only
+  locus_info <- locus_info[locus_info$locus_broad %in% c("chr5_129.52_131.88MB", "chr12_53.55_54.23MB", "chr11_63.28_66.27MB", "chr19_18.13_18.68MB"), ]
+  
+  for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+    reduced_locus_info <- locus_info[, c("locus", "tidy_locus", "chr_broad", "start_broad", "end_broad", pop)]
+    reduced_locus_info <- reduced_locus_info[reduced_locus_info[, pop] != "", ]
+    
+    if(nrow(reduced_locus_info) > 0){
+      input_data <- GWAS_results[[paste(pop, set, sep = "_")]]
+    input_magma <- MAGMA_results[[paste(pop, set, sep = "_")]]
+    
+    if(pop == "LAT"){
+      ld_pop = "AMR"
+    } else{
+      ld_pop = pop
+    }
+    
+    if(pop == "TAMA"){
+      nom_threshold = 4
+      sig_threshold = 6.1
+      sig_type = "logBF"
+    } else {
+      nom_threshold = -log10(1e-5)
+      sig_threshold = -log10(5e-8)
+      sig_type = "logP"
+    }
+    
+    print(paste0("Plotting: ", tidy_names[[pop]], " GWAS", tidy_names[[set]]))
+    progress_bar = txtProgressBar(min = 0, max = length(reduced_locus_info[, 1]), initial = 0) 
+
+    for(row in 1:length(reduced_locus_info[, 1])){
+      plot_title <- paste0(tidy_names[[pop]], tidy_names[[set]], " [", reduced_locus_info[row, "tidy_locus"], "]")
+      locus.zoom(data = input_data,
+                 snp = reduced_locus_info[row, pop],
+                 ignore.lead = TRUE,
+                 region = c(reduced_locus_info[row, "chr_broad"], reduced_locus_info[row, "start_broad"], reduced_locus_info[row, "end_broad"]),
+                 offset_bp = 10000,
+                 genes.data = gencode_genes,
+                 plot.title = plot_title,
+                 file.name = paste0("/Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/locuszooms/", pop, "/", set, "/", pop, "_", set, "_", reduced_locus_info[row, "locus"], "_Nov2022.jpg"),
+                 secondary.snp = reduced_locus_info[, pop],
+                 secondary.label = TRUE,
+                 genes.pvalue = input_magma,
+                 colour.genes = TRUE,
+                 population = ld_pop,
+                 nominal = nom_threshold,
+                 significant = sig_threshold,
+                 sig.type = sig_type,
+                 rsid.check = FALSE
+                )
+      setTxtProgressBar(progress_bar, row)
+      rm(plot_title)
+    }
+    close(progress_bar)
+    rm(row, reduced_locus_info, ld_pop, nom_threshold, sig_threshold, sig_type, input_data, input_magma, progress_bar)
+    }
+    
+    
+  }
+  rm(pop, locus_info)
+}
+rm(set)
+```
+
+
+
+```{bash remove_old_plots}
+
+
+
+## full cohort, chr19_18.14_18.39MB & chr19_18.46_18.68MB -> chr19_18.14_18.68MB
+
+## male cohort, chr5_129.68_130.63MB_A & chr5_130.91_131.85MB  -> chr5_129.68_131.85MB
+  # also delete chr5_129.68_130.63MB_B line,
+## male cohort, chr12_53.55_53.67MB & chr12_53.74_53.96MB -> chr12_53.55_53.96MB
+## female cohort, chr11_64.21_64.63MB & chr11_65.51_65.67MB -> chr11_64.21_65.67MB
+
+```
+
+
+
