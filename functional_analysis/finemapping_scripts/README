@@ -1,0 +1,148 @@
+################################################################################
+
+# This directory contains all the main scripts used to run finemapping and
+# SLALOM
+
+################################################################################
+
+# The general workflow for finemapping:
+# 1. Pull out summary statistics of the relevant region
+# 2. Generate LD of the regions using UKBB data set
+# 3. Run finemapping on the region using the generated LD
+# 4. Using the same regions, run SLALOM
+# 5. Identify and remove compromised loci from SLALOM
+
+################################################################################
+# Pull out loci regions from EUR summary stats
+
+# Make Z-score file for both PAINTOR and FINEMAP:
+#
+# SEX = full, male, or female
+# LOCI_LIST = GWAS loci list from full, male, or female
+#
+# NOTE: `loci_regions.txt` file generated from this script will/should be used
+# in generating LD from UKBB
+Rscript generic/make_zfile.R data/fema_data/EUR/EUR_meta_SEX1_clean_rsid.nfiltered.biallelic.txt LOCI_LIST SEX
+
+
+################################################################################
+# Generate LD information for each loci region using the UKBB data set
+
+# Using the `loci_regions.txt` file generated from `generic/make_zfile.R`, pull
+# out relevant region from the UKBB data set and calculate the LD
+#
+# NOTE: the same sample set that was used for the UKBB gout GWAS was used for
+# the LD
+#
+# REGION = second column of `loci_regions.txt` file
+# SNP = first column of `loci_regions.txt` file (corresponds to the lead variant)
+# SEX = full, male, or female
+bash ukbb_ld/calc_ld.sh REGION SNP data/ukbb_ld/SEX/
+
+
+################################################################################
+# Clean the input file for FINEMAP and PAINTOR
+#
+# The goal of this script is to keep only those variants present in both the
+# summary statistics and the UKBB LD, and makes sure the variants are aligned
+# to the same allele.
+#
+# Some other filtering also occurs, such as removing the variant that has MAF
+# difference >5% between the summary stats and the UKBB data set.
+#
+# LD = UKBB .ld file generated for the region
+# BIM = as above, but .bim file
+# FREQ = as above, but .frq file
+# Z_FILE = EUR summary statistics of the region
+# PORGRAM = either FINEMAP or PAINTOR
+Rscript generic/clean_input.R LD BIM FREQ Z_FILE PROGRAM
+
+
+################################################################################
+# FINEMAP
+
+# NOTE: Need to move/copy the *clean.txt files to *.z files before running the
+# script below
+#
+# SNP = The lead SNP of a locus (it should match the filename)
+# SEX = full, male, or female
+bash FINEMAP/run_finemap.sh LOCUS SEX
+
+# Pull out relevant info from the FINEMAP results:
+#
+# DIR = Directory where the FINEMAP outputs are located
+# SEX = full, male, or female
+# LOCI_LIST = loci list of the EUR GWAS (full/male/female)
+Rscript FINEMAP/munge_finemap_results.R DIR SEX LOCI_LIST
+
+
+################################################################################
+# PAINTOR
+
+# For PAINTOR, I ran single causal variant for most loci, but also ran multi
+# causal variant version for some that might have multiple signals
+
+
+# Figure out which annotations to use for PAINTOR.
+bash PAINTOR/run_sLDSC_paintor_annot.sh
+
+# Pull out significant annotations:
+Rscript PAINTOR/analyse_paintor_annot_res.R
+
+# Determine which annotations are correlated with one another
+Rscript PAINTOR/check_annot_corr.R
+
+# Run PAINTOR using the selected annotations
+bash PAINTOR/run_paintor.sh
+
+# Summarise the PAINTOR results
+#
+# DIR = directory where the PAINTOR results are
+# SEX = full, male, or female
+Rscript PAINTOR/munge_paintor_results.R DIR SEX
+
+
+################################################################################
+# TAMA BF
+
+# Run the logBF finemapping method on the TAMA GWAS results.
+#
+# The regions are defined in the same way as in the EUR loci regions.
+#
+# NOTE: This method is only done on the TAMA loci
+#
+# DATA = TAMA GWAS results (full/male/female)
+# SEX = full, male, or female
+# LOCI_LIST = loci list of the TAMA GWAS (full/male/female)
+Rscript TAMA_BF/tama_credible_set.R DATA SEX LOCI_LIST
+
+
+################################################################################
+# SLALOM
+
+# Some scripts needed to be altered from the original SLALOM paper:
+SLALOM/import_cup_files.py
+SLALOM/slalom.py
+
+# Prepare the summary stats for SLALOM
+bash SLALOM/prep_slalom.sh
+bash SLALOM/prep_slalom.tama.sh
+
+# Run SLALOM on the loci that were finemapped
+#
+# DATA = summary stats used for finemapping, formatted for SLALOM
+# OUT_DIR = where to output the SLALOM result
+bash SLALOM/run_slalom.sh DATA OUT_DIR
+bash SLALOM/run_slalom.tama.sh DATA OUT_DIR
+
+# Read in SLALOM results and determine which loci were suspicious
+#
+# OUT_DIR = where the SLALOM results are
+Rscript SLALOM/process_slalom_result.R OUT_DIR
+
+
+################################################################################
+# Combine all of the finemapping results into a single file
+
+Rscript generic/finemap_stats.combined.R
+

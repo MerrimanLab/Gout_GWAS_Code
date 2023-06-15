@@ -1,0 +1,2 @@
+z;ld;snp;config;cred;log;n_samples
+data/fine_mapping/finemap_dat/female/X.z;data/fine_mapping/finemap_dat/female/X.ld;results/credible_set/FINEMAP/sss_default/female/X.snp;results/credible_set/FINEMAP/sss_default/female/X.config;results/credible_set/FINEMAP/sss_default/female/X.cred;results/credible_set/FINEMAP/sss_default/female/X.log;1168490
