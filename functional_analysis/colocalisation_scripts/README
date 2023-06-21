@@ -1,0 +1,17 @@
+################################################################################
+
+# This directory contains the scripts for all the colocalisation analyses,
+# including eQTL, meQTL, and urate colocalisation
+
+################################################################################
+# GTEx cis-eQTL colocalisation
+
+# Code used for cis/trans-eQTL colocalisation were written by Murray Cadzow,
+# Tanya Major, and Megan Leask
+
+# GWAS = GWAS summary stats
+# SNPLIST = list of lead SNPs (in column 1)
+# WINDOW = window size (bp)
+# CPU = number of cpus for the parallel tasks
+
+bash colocalisation_scripts/eqtl/cis_eqtl/cis_eqtl_pipeline.sh GWAS SNPLIST WINDOW CPU quant
