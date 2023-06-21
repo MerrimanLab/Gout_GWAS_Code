@@ -1,0 +1,20 @@
+################################################################################
+
+# This directory contains the scripts used to run conditional analysis using
+# GCTA-cojo
+
+################################################################################
+
+# The input to the below script requires an input file (INPUT), summary stats
+# to run the conditional analysis on (SUMMARY), and the output directory
+# (OUTDIR) where the results are written to.
+#
+# Input file contain two columns:
+# 1) SNP - used to label the output file
+# 2) region - used to pull out the region from UKBB and GCTA cojo
+#
+# "region" must be in the form of "CHR:START-END" and must be padded with "0"s
+# if the chromosome is a single digit (e.g. 01:10000-100000)
+
+bash cojo_scripts/run_cojo.sh INPUT SUMMARY OUTDIR
+
