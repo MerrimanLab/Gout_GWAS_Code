@@ -15,3 +15,29 @@
 # CPU = number of cpus for the parallel tasks
 
 bash colocalisation_scripts/eqtl/cis_eqtl/cis_eqtl_pipeline.sh GWAS SNPLIST WINDOW CPU quant
+
+################################################################################
+# GTEx trans-eQTL colocalisation
+
+# Trans-eQTL is done in few steps:
+# 1. Identify SNPs that need to be tested for trans-eQTL (?) - TODO: confirm with MEGAN
+# 2. Send to Justin O'Sullivan and Tayaza Fadason for CoDeS3D analysis
+# 3. TODO: part2
+
+# GWAS = GWAS summary stats
+# QTL =  Tab delimited file with rsid, gene symbol, and GTEx tissue columns
+# WINDOW = window size (bp)
+bash colocalisation_scripts/eqtl/trans_eqtl/trans_eqtl_pipeline_part1.sh GWAS QTL WINDOW
+
+# Output of above script is sent off for CoDeS3D analysis
+
+# Trans-eQTL colocalisation is run after the results come back from CoDeS3D
+bash colocalisation_scripts/eqtl/trans_eqtl/trans_eqtl_pipeline_part2.sh
+
+################################################################################
+# GoDMC cis-meQTL colocalisation
+
+
+################################################################################
+# Tin + UKBB urate colocalisation
+
