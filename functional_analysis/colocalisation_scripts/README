@@ -20,9 +20,14 @@ bash colocalisation_scripts/eqtl/cis_eqtl/cis_eqtl_pipeline.sh GWAS SNPLIST WIND
 # GTEx trans-eQTL colocalisation
 
 # Trans-eQTL is done in few steps:
-# 1. Identify SNPs that need to be tested for trans-eQTL (?) - TODO: confirm with MEGAN
-# 2. Send to Justin O'Sullivan and Tayaza Fadason for CoDeS3D analysis
-# 3. TODO: part2
+# 1. Justin O'Sullivan and Tayaza Fadason runs the CoDeS3D analysis on the gout
+#    GWAS lead SNPs and sends back a list of variants with trans-eQTL(s)
+# 2. Generate lists of variants that we need to run colocalisation with and
+#    send them to Justin and Tayaza to get the trans-eQTL summary stats for
+#    those variants (this is what the `trans_eqtl_pipeline_part1.sh` script
+#    does)
+# 3. Once we have trans-eQTL summary stats, run the coloc on the region
+#    (`trans_eqtl_pipeline_part2.sh`)
 
 # GWAS = GWAS summary stats
 # QTL =  Tab delimited file with rsid, gene symbol, and GTEx tissue columns
@@ -55,3 +60,13 @@ bash src/run_pipeline.sh INPUT SEX OUTDIR
 ################################################################################
 # Tin + UKBB urate colocalisation
 
+# Pull out the urate loci from gout and urate meta-analysis results
+Rscript colocalisation_scripts/urate/split_sumstats.urate_loci.R
+
+# Run colocalisation of gout and urate
+Rscript colocalisation_scripts/urate/run_coloc.gout_urate.R
+
+# Combine the coloc results and save various results (H2 loci, H3 loci, H2 + H4
+# loci) and apply the threshold/criteria for interesting loci
+Rscript colocalisation_scripts/urate/merge_coloc_res.urate_loci.R
+Rscript colocalisation_scripts/urate/h2_h3_criteria.R
