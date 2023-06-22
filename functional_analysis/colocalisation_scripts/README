@@ -37,6 +37,20 @@ bash colocalisation_scripts/eqtl/trans_eqtl/trans_eqtl_pipeline_part2.sh
 ################################################################################
 # GoDMC cis-meQTL colocalisation
 
+# The script below runs the whole meQTL colocalisation analysis, given a list
+# of CHR/BP
+#
+# General steps:
+# 1. Figure out if there are any significant meQTL for a variant
+# 2. Make sure the meQTLs from 1) are in cis and passes bonferroni correction
+# 3. Pull out relevant summary stats from GWAS and meQTL data
+# 4. Run colocalisation analysis
+# 5. Combine the results
+#
+# INPUT = list of "CHR_BP"
+# SEX = full, male, or female
+# OUTDIR = the output directory where the results are written to
+bash src/run_pipeline.sh INPUT SEX OUTDIR
 
 ################################################################################
 # Tin + UKBB urate colocalisation
