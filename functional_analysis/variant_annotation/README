@@ -1,0 +1,70 @@
+################################################################################
+
+# This directory contains the scripts for everything related to the annotation
+# of the variants that came out of finemapping and conditional analyses
+
+################################################################################
+# dbSNP annoations
+
+# Download dbSNP data:
+bash download_dbsnp_list.sh
+
+# Pull out missense variants from the above
+bahs make_missense_list.sh
+
+################################################################################
+# Variant identification
+
+# For missnense, ABC, and FATHMM annotations, you first need a starting list of
+# variants we want to annotate. These variants will come from conditional
+# analysis, finemapping, and GWAS loci. High LD variants from these analyses
+# were also considered.
+
+# Make a list of variants from finemapping, conditional analysis, and GWAS
+# lead, and look for high LD variants.
+bash get_proxy.sh
+bash clean_ld_list.sh
+
+################################################################################
+# Identification of missense variants
+
+# Add information about missense (or not) to the variants identified above:
+Rscript proxy_to_missense.R
+
+# First get the gene info from the dbSNP data, and then add it to the missense
+# variant table:
+bash get_gene_info.sh
+Rscript add_gene_to_missense.R
+
+# For each cohort/sex, pull out the summary stats and add it to the
+# missense variant table:
+#
+# SEX = full, male, or female
+Rscript pull_missense_sumstats.R SEX
+Rscript make_missense_table.R SEX
+
+# Create the final missense table:
+Rscript combine_missense_table.R
+
+################################################################################
+# Non-missense variant annotation
+
+# Generate a list of non-missense variants for FATHMM and ABC
+Rscript make_fathmm_abc_input.R
+
+# FATHMM
+#
+# For FATHMM, input the list of variants to http://fathmm.biocompute.org.uk/fathmmMKL.htm
+
+
+# ABC
+
+# Overlap the input data with Activity-by-contact (ABC) data
+#
+# DATA = input data for ABC overlap
+# OUT = output name
+Rscript abc_model_overlap.R DATA OUT
+
+# Merge, clean, and summarize the ABC/FATHMM output:
+Rscript non_coding_table.R
+
