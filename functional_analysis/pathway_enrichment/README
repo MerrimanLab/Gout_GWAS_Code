@@ -1,0 +1,26 @@
+################################################################################
+
+# This directory contains the scripts for pathway enrichment analysis,
+# including DEPICT
+
+################################################################################
+# DEPICT
+
+# Clean up/convert the summary stats into a format required for DEPICT
+bash depict_scripts/convert_sumstats.sh
+Rscript depict_scripts/convert_tama.R
+
+# DEPICT uses a "template" file as an input to describe files, thresholds, etc.
+# This script edits the template file.
+#
+# anc = ancestry (lower case)
+# ANC = ancestry
+# THRES = significance threshold set for clumping
+# COL = P or logBF
+bash depict_scripts/edit_template.sh data/depict/anc_full.txt depict_scripts/anc_full ANC THRES COL
+
+# Run DEPICT using the edited config file (see https://github.com/perslab/depict)
+
+################################################################################
+# TODO: Nick and Megan's code
+
