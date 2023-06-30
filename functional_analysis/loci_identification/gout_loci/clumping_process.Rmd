@@ -1,0 +1,575 @@
+---
+title: "Clumping Process"
+author: "Tanya Major"
+date: "First Run: 5th Aug 2021; Updated: `r format(Sys.Date(), '%dth %b %Y')`"
+output:
+  rmarkdown::html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: false
+    code_folding: "hide"
+---
+
+```{r markdown_setup, echo = FALSE, message = FALSE}
+# Set options you want to apply to all chunks here
+knitr::opts_chunk$set(cache = TRUE, tidy = TRUE, echo = TRUE, comment = "", tidy.opts = list(width.cutoff = 100), message = FALSE)
+options(width = 400)
+options(knitr.table.format = "html")
+```
+
+```{r set_workingdir, echo = FALSE}
+# this sets the markdown document directory to the R project directory, not the directory the markdown is saved in (eg. can save markdown in project/docs, but run markdown from project/)
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+```
+
+**_Working Directory: `r getwd()`_**
+
+<style>
+body {
+text-align: justify
+}
+</style>
+
+```{r load_libraries}
+# for markdown formatting
+library(formatR)
+library(kableExtra)
+library(DT)
+
+# for project
+library(tidyverse)
+```
+
+<br>
+
+
+**On October 10th 2022 all files in the merrimanlab area of `scratch` were corrupted (or potentially corrupted) during a server move.**
+
+This document details the process used to define independent signals in the gout GWAS. This process was first run in August 2021 and has gone through several iterations since then. The code in this document is a reduced version of the `--clump` code that details only the steps that have been maintained from the `Independent Signals.Rmd` document.
+
+
+
+### Step 1: Define Locus Boundaries
+
+This process was devised by Ruth and is detailed elsewhere. There have been several revisions to the locus boundaries over time based on:
+
+
+  + amalgamated locus boundaries across ancestries and sexes
+  + LD between neighbouring loci
+  + visual examination of locuszoom plots after clumping round 1
+
+
+This is the original code / files loaded into this process.
+
+```{r load_loci_files, eval = FALSE}
+# original locus boundary source files
+# there have been so many changes it is easier to load locus boundaries from our 'finalised' locus summary file when run re-checks etc.
+raw_regions <- list()
+for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+  for(set in c("full", "male", "female")){
+    raw_regions[[paste(pop, set, sep = "_")]] <- read.delim(paste0("/Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/loci_clumping/from_Ruth/", set, "_", pop, "_GWAS_SNP_reduced_loci.txt"), header = TRUE)
+  }
+  rm(set)
+}
+rm(pop)
+```
+
+
+
+These are the current locus boundaries after many iterations of editing.
+
+```{r load_locus_boundaries}
+# the file used here was created by Ruth from a half-made file of Tanya's that merged loci based on sex-specific "Main_GWAS_loci" notes from ages ago
+# It has four loci in it that need re-clumping
+temp_loci <- read.delim("PostGWAS_Repo/results/loci_clumping/combinedlocitable_broad.txt", header = TRUE)
+temp_loci$LOCUS <- paste0("chr", temp_loci$chr_broad, "_", round(temp_loci$start_broad / 1000000, digits = 2), "_", round(temp_loci$end_broad / 1000000, digits = 2), "MB")
+
+# split into ancestry + sex specific info required for next steps
+raw_regions <- list()
+for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+  for(set in c("full", "male", "female")){
+    data <- temp_loci[temp_loci[, paste(pop, set, sep = "_")] != "", c("LOCUS", "chr_broad", "start_broad", "end_broad")]
+    data <- unique(data)
+    raw_regions[[paste(pop, set, sep = "_")]] <- data
+    rm(data)
+  }
+  rm(set)
+}
+rm(pop, temp_loci)
+```
+
+
+The clumping code requires:
+
+
+  + chromosome
+  + locus start
+  + locus end
+  + locus name
+  + ancestry
+  + sex
+
+
+It uses the same locus input file to specify which regions to clump for all the ancestry/sex GWAS results combos.
+
+
+```{r save_locus_boundaries, eval = FALSE}
+# rbind together all loci boundaries needed
+temp_loci <- do.call(rbind, raw_regions)
+
+# split pop and sex out of new row.names
+temp_loci$population <- do.call(rbind, strsplit(row.names(temp_loci), split = "_"))[, 1]
+temp_loci$sex <- do.call(rbind, strsplit(row.names(temp_loci), split = "_"))[, 2]
+temp_loci$sex <- do.call(rbind, strsplit(temp_loci$sex, split = "\\."))[, 1]
+
+# save files of loci to reclump
+write.table(temp_loci[temp_loci$sex == "full", ], file = "PostGWAS_Repo/results/loci_clumping/FULL_broad-loci_reclump_Nov2022.txt", quote = FALSE, sep = "\t", na = "", row.names = FALSE)
+write.table(temp_loci[temp_loci$sex == "male", ], file = "PostGWAS_Repo/results/loci_clumping/MALE_broad-loci_reclump_Nov2022.txt", quote = FALSE, sep = "\t", na = "", row.names = FALSE)
+write.table(temp_loci[temp_loci$sex == "female", ], file = "PostGWAS_Repo/results/loci_clumping/FEMALE_broad-loci_reclump_Nov2022.txt", quote = FALSE, sep = "\t", na = "", row.names = FALSE)
+rm(temp_loci)
+```
+
+
+
+
+### Step 2: Prepare GWAS Results For Clumping
+
+The `--clump` function uses p-values in the clumping process. It does not understand numbers smaller than 1x10^-300 and it will not understand the log[10] Baye's Factor numbers from TAMA. Therefore some minor data conversion steps are required to prepare the GWAS p-values before clumping.
+
+
+  + For numbers <1x0^-300, they are reduced to ~1x10^-300, but maintaining their relative rank to each other
+  + For the log[10]BF values, they are inversed, with anything <1 being set to 1 before this inversion
+
+
+The files that these clumping files are made from have already been filtered for SNPs that were present in at least half of the studies or 20% of participants, or present in all four ancestries for TAMA, only biallelic SNPs (including cross-study comparison of alleles), and SNPs with a minor allele frequency > 0.1%.
+
+The clumping files only require SNP and P columns (though we also include logBF/logP columns), so these files can be created from the locuszoom versions of GWAS results to save computing time.
+
+
+```{bash locuszoom_file_creation, eval = FALSE}
+# this is the code that was run to create the locuszoom (minimal column) files
+for set in $(echo full male female);
+  do
+    if [ "${pop}" = "TAMA" ];
+    then
+      cut -f 1-3,7 /Volumes/archive/merrimanlab/major_gwas_paper_archive/results_meta_analysis/${pop}/${set}/tama_${set}_clean.nfiltered.biallelic.txt > temp.tmp;
+      awk '{OFS="\t"; print $2,$3,$1,$4}' < temp.tmp > /Volumes/archive/merrimanlab/major_gwas_paper_archive/results_meta_analysis/${pop}_meta_${set}_clean_rsid.nfiltered.biallelic.LZ;
+      rm temp.tmp;
+    else
+      cut -f1-3,12,22 /Volumes/archive/merrimanlab/major_gwas_paper_archive/results_meta_analysis/${pop}/${set}/${pop}_meta_${set}1_clean_rsid.nfiltered.biallelic.txt > /Volumes/archive/merrimanlab/major_gwas_paper_archive/results_meta_analysis/${pop}_meta_${set}_clean_rsid.nfiltered.biallelic.LZ;
+    fi;
+  done
+```
+
+
+
+```{r import_GWAS_sumstats, eval = FALSE}
+GWAS_results <- list()
+# this import code includes specifying the p-value column should be read as a character rather than numeric so values <1x10-300 are not converted to NA prematurely
+for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+  if(pop == "TAMA"){
+    column_formats <- c("numeric", "numeric", "character", "numeric")
+  } else{
+    column_formats <- c("numeric", "numeric", "character", "character", "numeric")
+  }
+  for(set in c("full", "male", "female")){
+    GWAS_results[[paste(pop, set, sep = "_")]] <- read.delim(paste0("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_meta_analysis/", pop, "_meta_", set, "_clean_rsid.nfiltered.biallelic.LZ"), header = TRUE, colClasses = column_formats)
+  }
+  rm(set, column_formats)
+}
+rm(pop)
+```
+
+
+```{r convert_for_clumping, eval = FALSE}
+## AFR, EAS, EUR, LAT logP version
+for(pop in c("AFR", "EAS", "EUR", "LAT")){
+  for(set in c("full", "male", "female")){
+    clump_file <- GWAS_results[[paste(pop, set, sep = "_")]]
+
+  # identify p-values too small for PLINK numeric precision and convert to numbers PLINK can understand
+  # rank values to maintain relative significance of variants inside floating precision point numbers
+  # have to inverse the -log10P order so that the higher the rank, the smaller the p-value
+    clump_file$P <- as.numeric(clump_file$P)
+    clump_file$P[clump_file$P < 1e-300] = 0
+    clump_file$rank[clump_file$P == 0] <- rank(-clump_file$log10P[clump_file$P == 0])
+    clump_file$adjP <- ifelse(clump_file$P == 0, clump_file$rank * .Machine$double.xmin, clump_file$P)
+
+    clump_file <- clump_file[, c("SNP", "log10P", "adjP")]
+    names(clump_file)[3] <- "P"
+
+    GWAS_results[[paste(pop, set, "clump", sep = "_")]] <- clump_file
+    rm(clump_file)
+  }
+  rm(set)
+}
+rm(pop)
+
+## TAMA logBF version
+for(set in c("full", "male", "female")){
+  clump_file <- GWAS_results[[paste0("TAMA_", set)]]
+  clump_file <- clump_file[, c("SNP", "logBF")]
+  clump_file$P <- ifelse(test = clump_file$logBF < 1, yes = 1, no = 1/clump_file$logBF)
+  GWAS_results[[paste0("TAMA_", set, "_clump")]] <- clump_file
+  rm(clump_file)
+}
+rm(set)
+```
+
+
+```{r save_clump.in_files, eval = FALSE}
+# save clump.in file
+for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+  for(set in c("full", "male", "female")){
+    write.table(GWAS_results[[paste(pop, set, "clump", sep = "_")]], file = paste0("/Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/loci_clumping/", pop, "/", pop, "_", set, "_clean_rsid.nfiltered.biallelic.clump.in"), quote = FALSE, sep = "\t", na = "", row.names = FALSE)
+  }
+  rm(set)
+}
+rm(pop)
+```
+
+
+### Step 3: PLINK Clumping Analysis
+
+The `--clump` function requires a reference file of LD values. These were a set of bfiles merging the 1000 Genomes SNP data into one set per ancestry and were saved in Riku's scratch folder. At least a portion of them are now corrupted.
+
+Therefore in this re-clumping process the 1000 Genomes VCF files (split into ancestry and filtered to remove relatives) were used as the LD reference files.
+
+
+
+```{bash clump_loci, eval = FALSE}
+module load plink/plink1.9b4.9
+
+## chop header off loci boundaries file
+parallel 'tail -n+2 PostGWAS_Repo/results/loci_clumping/{}_broad-loci_reclump_Nov2022.txt > PostGWAS_Repo/results/loci_clumping/{}_loci.tmp' ::: FULL MALE FEMALE
+
+## run clumping
+parallel 'while read -u 9 -r line;
+  do
+    name=$(echo "$line" | cut -f1)
+    chr=$(echo "$line" | cut -f2)
+    start=$(echo "$line" | cut -f3)
+    end=$(echo "$line" | cut -f4)
+    pop=$(echo "$line" | cut -f5)
+    set=$(echo "$line" | cut -f6)
+
+  # make sure chromosome X vcf can load
+    if [ ${chr} == 23 ];
+    then
+      chr_vcf=X
+    else
+      chr_vcf=${chr}
+    fi
+
+  # make sure correct p-value thresholds are used between single-ancestry and TAMA
+    if [ ${pop} == "TAMA" ];
+    then
+      P1=0.16667
+      P2=0.25
+    else
+      P1=5e-8
+      P2=1e-5
+    fi
+
+  # specify which vcf to import as the reference (TAMA & LAT pop doesnt match between notation styles)
+    if [ ${pop} == "TAMA" ];
+    then
+      VCF_FILE=TAMA/AFR_AMR_EAS_EUR_chr${chr_vcf}.no_relatives.no_indel.biallelic.vcf.gz
+    elif [ ${pop} == "LAT" ];
+    then
+      VCF_FILE=AMR/AMR_chr${chr_vcf}.no_relatives.no_indel.biallelic.vcf.gz
+    else
+      VCF_FILE=${pop}/${pop}_chr${chr_vcf}.no_relatives.no_indel.biallelic.vcf.gz
+    fi
+
+    plink \
+      --vcf /Volumes/archive/merrimanlab/reference_files/VCF/1000Genomes_vcf_files/Phase3_March2017/${VCF_FILE} \
+      --exclude /Volumes/archive/merrimanlab/reference_files/VCF/1000Genomes_vcf_files/Phase3_March2017/duplicate_SNPids.txt \
+      --chr ${chr} \
+      --from-bp ${start} \
+      --to-bp ${end} \
+      --clump /Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/loci_clumping/${pop}/${pop}_${set}_clean_rsid.nfiltered.biallelic.clump.in \
+      --clump-p1 ${P1} \
+      --clump-p2 ${P2} \
+      --clump-r2 0.01 \
+      --clump-kb 10000 \
+      --out PostGWAS_Repo/results/loci_clumping/${pop}/${set}/${pop}_${set}_0.01_${name}.biallelic.Nov22 \
+      --clump-allow-overlap
+
+  # repeat clumping for LAT using TAMA reference files
+    if [ ${pop} == "LAT" ];
+    then
+      # use TAMA VCF file
+      VCF_FILE=TAMA/AFR_AMR_EAS_EUR_chr${chr_vcf}.no_relatives.no_indel.biallelic.vcf.gz
+
+      # re-run PLINK
+      plink \
+      --vcf /Volumes/archive/merrimanlab/reference_files/VCF/1000Genomes_vcf_files/Phase3_March2017/${VCF_FILE} \
+      --exclude /Volumes/archive/merrimanlab/reference_files/VCF/1000Genomes_vcf_files/Phase3_March2017/duplicate_SNPids.txt \
+      --chr ${chr} \
+      --from-bp ${start} \
+      --to-bp ${end} \
+      --clump /Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/loci_clumping/${pop}/${pop}_${set}_clean_rsid.nfiltered.biallelic.clump.in \
+      --clump-p1 ${P1} \
+      --clump-p2 ${P2} \
+      --clump-r2 0.01 \
+      --clump-kb 10000 \
+      --out PostGWAS_Repo/results/loci_clumping/${pop}/${set}/${pop}-TAMA_${set}_0.01_${name}.biallelic.Nov22 \
+      --clump-allow-overlap
+    fi
+  done 9< PostGWAS_Repo/results/loci_clumping/{}_loci.tmp' ::: FULL MALE FEMALE
+
+rm PostGWAS_Repo/results/loci_clumping/loci.tmp
+rm PostGWAS_Repo/results/loci_clumping/*/*/*.biallelic.Nov22.nosex
+```
+
+
+### Step 4: Summarise Clumping Results
+
+For all loci where clumping was able to output a result the SNP that was chosen as the "lead SNP" needs to be noted. Where more than one SNP was chosen this also needs to be noted, with some loci being reduced to a single SNP as the representative due to complexity in the region (e.g. _SLC2A9_ and _ABCG2_), while others are given multiple independent signals in the locus.
+
+_Note: At this stage (November 2022) this clumping process was re-run solely for Ruth to complete the "what did we kick out" table for the paper._
+
+
+```{r load_clumping_results}
+raw_clumps <- list()
+for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+  for(set in c("full", "male", "female")){
+    files <- list.files(path = paste("/Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/loci_clumping", pop, set, sep = "/"), pattern = "\\.clumped", full.names = FALSE)
+
+  # include code to load TAMA reference panel version of LAT clumping
+    if(pop == "LAT"){
+      files_tama <- files[grepl(files, pattern = "TAMA")]
+      files <- files[!grepl(files, pattern = "TAMA")]
+    }
+
+    index = 1
+    for(file in files){
+      name <- gsub(pattern = paste(pop, set, "0.01_", sep = "_"), replacement = "", file)
+      name <- gsub(pattern = "\\.biallelic.Nov22.clumped", replacement = "", name)
+      load <- read.table(paste("/Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/loci_clumping", pop, set, file, sep = "/"), header=TRUE, quote="\"")
+      load$locus <- name
+      if(index > 1){
+        raw_clumps[[paste(pop, set, sep = "_")]] <- rbind(raw_clumps[[paste(pop, set, sep = "_")]], load)
+      } else{
+        raw_clumps[[paste(pop, set, sep = "_")]] <- load
+      }
+      rm(load, name)
+      index = index + 1
+    }
+    rm(file, index, files)
+
+    if(pop == "LAT"){
+      index = 1
+      for(file in files_tama){
+        name <- gsub(pattern = paste("LAT-TAMA", set, "0.01_", sep = "_"), replacement = "", file)
+        name <- gsub(pattern = "\\.biallelic.Nov22.clumped", replacement = "", name)
+        load <- read.table(paste("/Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/loci_clumping", pop, set, file, sep = "/"), header=TRUE, quote="\"")
+        load$locus <- name
+        if(index > 1){
+          raw_clumps[[paste("LAT-TAMA", set, sep = "_")]] <- rbind(raw_clumps[[paste("LAT-TAMA", set, sep = "_")]], load)
+        } else{
+          raw_clumps[[paste("LAT-TAMA", set, sep = "_")]] <- load
+        }
+        rm(load, name)
+        index = index + 1
+      }
+      rm(file, index, files_tama)
+    }
+  }
+  rm(set)
+}
+rm(pop)
+```
+
+
+```{r count_hits}
+clumps_summary <- list()
+for(pop in c("AFR", "EAS", "EUR", "LAT", "LAT-TAMA", "TAMA")){
+  for(set in c("full", "male", "female")){
+    counts <- as.data.frame(table(raw_clumps[[paste(pop, set, sep = "_")]][, "locus"]))
+    names(counts) <- c("locus", "signals")
+    clumps_summary[[paste(pop, set, sep = "_")]] <- counts
+    rm(counts)
+  }
+  rm(set)
+}
+rm(pop)
+```
+
+
+```{r tidy_clumps}
+tidy_clumps <- list()
+for(pop in c("AFR", "EAS", "EUR", "LAT", "LAT-TAMA", "TAMA")){
+  for(set in c("full", "male", "female")){
+    clumps <- raw_clumps[[paste(pop, set, sep = "_")]]
+    clumps <- clumps[, c("locus", "SNP", "CHR", "BP")]
+    clumps$POP <- pop
+    clumps$SEX <- set
+
+    signals <- clumps_summary[[paste(pop, set, sep = "_")]]
+    if(pop == "LAT-TAMA"){
+      region <- raw_regions[[paste("LAT", set, sep = "_")]]
+    } else{
+      region <- raw_regions[[paste(pop, set, sep = "_")]]
+    }
+    names(region)[1] <- "locus"
+
+    orig_clumps <- merge(region, clumps, by = "locus", all = TRUE)
+    orig_clumps <- merge(orig_clumps, signals, by = "locus", all = TRUE)
+    tidy_clumps[[paste(pop, set, sep = "_")]] <- orig_clumps
+
+    rm(clumps, orig_clumps, signals, region)
+  }
+  rm(set)
+}
+rm(pop)
+
+# add LAT and LAT-TAMA results together
+for(set in c("full", "male", "female")){
+  lat_results <- tidy_clumps[[paste0("LAT_", set)]]
+  lat.tama_results <- tidy_clumps[[paste0("LAT-TAMA_", set)]]
+
+  lat_results <- merge(lat_results, lat.tama_results, by = c("locus", "chr_broad", "start_broad", "end_broad", "SNP", "CHR", "BP", "SEX"), all = TRUE, suffixes = c("", ".v2"))
+
+  tidy_clumps[[paste0("LAT_", set)]] <- lat_results
+  tidy_clumps[[paste0("LAT-TAMA_", set)]] <- NULL
+  rm(lat_results, lat.tama_results)
+}
+rm(set)
+
+rm(clumps_summary)
+```
+
+
+```{r save_tidied_clumps, eval = FALSE}
+today <- "28Nov2022"
+for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+  for(set in c("full", "male", "female")){
+    filename <- paste0("/Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/loci_clumping/", pop, "_", set,  "_sigregion_0.01clumping_resultsummary_", today, ".txt")
+    write.table(tidy_clumps[[paste(pop, set, sep = "_")]], file = filename, row.names = FALSE, sep = "\t", na = "", quote = FALSE)
+    rm(filename)
+  }
+  rm(set)
+}
+rm(pop, today)
+```
+
+
+### EXTRA: Compare Re-Clumping Results to Locus Summary File
+
+Because this is a re-run that does not quite match the original code due to the file corruption this step is added here to make sure the clumping process is working properly.
+
+
+  + Differences in code:
+
+    - recreating the `.clump.in` files
+
+    - use of different reference files `.vcf.gz` instead of `{pop}_wgs.{bed,bim,fam}`
+
+    - use of "wide" locus boundaries
+
+
+```{r load_loci_summary}
+# the file used here was created by Ruth from a half-made file of Tanya's that merged loci based on sex-specific "Main_GWAS_loci" notes from ages ago
+loci_summary <- read.delim("PostGWAS_Repo/results/loci_clumping/combinedlocitable_broad.txt", header = TRUE)
+loci_summary$locus_broad <- paste0("chr", loci_summary$chr_broad, "_", round(loci_summary$start_broad / 1000000, digits = 2), "_", round(loci_summary$end_broad / 1000000, digits = 2), "MB")
+```
+
+
+**Question 1: Are all the SNPs in our paper SNP list in the new clumping files?**
+
+
+```{r compare_rsIDs1}
+for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+  for(set in c("full", "male", "female")){
+    clump_results <- tidy_clumps[[paste(pop, set, sep = "_")]]
+    called_SNPs <- loci_summary[, paste(pop, set, sep = "_")]
+    called_SNPs <- called_SNPs[called_SNPs != ""]
+
+    print(paste(pop, set, sep = " - "))
+    print(table(called_SNPs %in% clump_results$SNP))
+
+    rm(clump_results, called_SNPs)
+  }
+  rm(set)
+}
+rm(pop)
+```
+
+
+
+**Question 2: How many of the SNPs in the new clumping files are not in our paper SNP list?** (We expect quite a few at _SLC2A9_, _ABCG2_, _SLC17A1/4_, and _SLC22A11/12_).
+
+
+```{r compare_rsIDs2}
+for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+  for(set in c("full", "male", "female")){
+    clump_results <- tidy_clumps[[paste(pop, set, sep = "_")]]
+    called_SNPs <- loci_summary[, paste(pop, set, sep = "_")]
+    called_SNPs <- called_SNPs[called_SNPs != ""]
+
+    print(paste(pop, set, sep = " - "))
+    print(table(clump_results$SNP %in% called_SNPs, clump_results$CHR, exclude = NULL))
+
+    rm(clump_results, called_SNPs)
+  }
+  rm(set)
+}
+rm(pop)
+```
+
+
+**Create a file for Ruth to use in her "deleted SNPs" supplemental table.**
+
+This file includes notes on whether a SNP is/isn't included in our "best" locus summary file, and appended to the end are the "missing" SNPs from that locus summary file.
+
+
+```{r create_ruths_file, eval = FALSE}
+for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+  for(set in c("full", "male", "female")){
+    clump_results <- tidy_clumps[[paste(pop, set, sep = "_")]]
+    names(clump_results)[1] <- "locus_broad"
+
+    called_SNPs <- loci_summary[, c("locus_broad", "chr_broad", "start_broad", "end_broad", paste(pop, set, sep = "_"))]
+    called_SNPs <- called_SNPs[called_SNPs[, 5] != "", ]
+
+    if(pop != "LAT"){
+      clump_results[, c("POP.v2", "signals.v2")] <- NA
+    }
+
+    clump_results$leadSNP[clump_results$SNP %in% called_SNPs[, 5]] <- "lead SNP (kept)"
+    clump_results$leadSNP[!(clump_results$SNP %in% called_SNPs[, 5])] <- "deleted SNP (?)"
+    clump_results$leadSNP[is.na(clump_results$SNP)] <- "failed clumping"
+
+    missing_SNPs <- called_SNPs[!(called_SNPs[, 5] %in% clump_results$SNP), ]
+
+    if(nrow(missing_SNPs) > 0){
+      names(missing_SNPs)[5] <- "SNP"
+      missing_SNPs$POP <- pop
+      missing_SNPs$SEX <- set
+      missing_SNPs$leadSNP <- "missing SNP"
+
+      missing_SNPs[, c("CHR", "BP", "signals", "POP.v2", "signals.v2")] <- NA
+
+      clump_results <- rbind(clump_results, missing_SNPs[, names(clump_results)])
+    }
+
+    clump_results <- clump_results[order(clump_results$chr_broad, clump_results$start_broad), ]
+
+    if(exists("clump_results_all")){
+      clump_results_all <- rbind(clump_results_all, clump_results)
+    } else{
+      clump_results_all <- clump_results
+    }
+
+    rm(clump_results, called_SNPs, missing_SNPs)
+  }
+  rm(set)
+}
+rm(pop)
+
+# save for Ruth
+write.table(clump_results_all, file = "PostGWAS_Repo/results/loci_clumping/ALL_clumpresults_forRuth_28Nov2022.txt", quote = FALSE, sep = "\t", na = "", row.names = FALSE)
+```
+

@@ -1,0 +1,60 @@
+################################################################################
+
+# This directory contains the scripts for identifying and generating the list
+# of loci from the gout and urate GWAS
+
+################################################################################
+# Gout loci identification
+
+# Gout loci were identified and listed up by Ruth and Tanya, and this process
+# have gone through MANY iterations. This process was both manual and
+# automated/scripted.
+
+# First, Ruth generated a list of loci based on the neighbouring significant
+# variants using GenomicRanges (checking for continuous significant variants
+# within +/-50kb). See the file below:
+
+gout_loci/Part1_making_tables.R
+
+# Next, Tanya used this list to clump and check for LD between the lead
+# variants at different regions:
+
+gout_loci/clumping_process.Rmd
+
+################################################################################
+# Urate loci identification
+
+# Urate loci were (crudely) identified by Riku, recreating the method mentioned
+# in our paper. The general methodology should be identical as above, although
+# things may have been done slightly differently.
+
+# Generate a file of Tin + UKBB urate meta analysis result with adjusted P so
+# that the clumping doesn't miss the extremely significant variants
+Rscript urate_loci/scale_p.R
+
+# Generate a crude loci list:
+Rscript urate_loci/pre_clump.R
+
+# In parallel, clump each urate locus region
+#
+# Note that each region was saved separately in the previous script
+parallel --xapply -j10 bash src/clump/loci_clump.sh dat/urate_clumping/{1}.txt {2} ::: $(cut -f7 dat/urate_clumping/crude_clumping.txt) ::: $(cut -f8 dat/urate_clumping/crude_clumping.txt)
+
+# Check the clump results and make sure the lead variant in each clump/region
+# is the same as the input lead variant, since the lead variant may be missing
+# in the 1000 Genomes data sometimes
+Rscript urate_loci/post_clump.check.R
+
+# Plot LZ for the clumps that didn't have the matching lead variant and make
+# sure the clump lead wasn't too far away/completely wrong
+Rscript urate_loci/plot_lz.no_match.R
+
+# Calculate the LD between the lead variants of clumps:
+bash urate_loci/get_cross_loci_ld.sh
+
+# Merge clumps/regions that have high enough LD (and (re)clump the merged region)
+Rscript urate_loci/check_cross_loci_ld.R
+Rscript urate_loci/reclump_check.R
+
+# Note: these urate loci are not "complete" like our gout loci, since I haven't
+# identified all the different signals within locus.
