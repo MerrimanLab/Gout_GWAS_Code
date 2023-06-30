@@ -1,0 +1,11 @@
+################################################################################
+
+# This directory contains the scripts for identifying heterogeneous
+# loci/variats
+
+################################################################################
+
+# Below is the script written and used by Tanya to identify heterogeneous
+# variants (sex and ancestry). Methods section in our paper will describe the
+# threshold/criteria used for determining this
+Heterogeneity.Rmd

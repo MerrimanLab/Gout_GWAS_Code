@@ -1,0 +1,437 @@
+---
+title: "Sex-Based SNP Heterogeneity"
+author: "Tanya Major"
+date: "First Run: 28th Apr 2022; Updated: `r format(Sys.Date(), '%dth %b %Y')`"
+output:
+  rmarkdown::html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: false
+    code_folding: "hide"
+---
+
+```{r markdown_setup, echo = FALSE, message = FALSE}
+# Set options you want to apply to all chunks here
+knitr::opts_chunk$set(cache = TRUE, tidy = TRUE, echo = TRUE, comment = "", tidy.opts = list(width.cutoff = 100), message = FALSE)
+options(width = 400)
+options(knitr.table.format = "html")
+```
+
+```{r set_workingdir, echo = FALSE}
+# this sets the markdown document directory to the R project directory, not the directory the markdown is saved in (eg. can save markdown in project/docs, but run markdown from project/)
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+```
+
+**_Working Directory: `r getwd()`_**
+
+<style>
+body {
+text-align: justify
+}
+</style>
+
+```{r load_libraries}
+# for markdown formatting
+library(formatR)
+library(kableExtra)
+library(DT)
+
+# for project
+library(meta)
+library(VennDiagram)
+```
+
+<br>
+
+```{r GWAS_colourscheme}
+# load libraries
+library(ggplot2)
+library(gridExtra)
+# devtools::install_github("G-Thomson/Manu")
+# library(Manu)
+
+# set colour palette (Tui + two Kereru)
+# for outlines, things in black etc use "#21282F"
+# when a plot only needs 1/2 colours use the first ones in the list this creates
+## won't work on server
+# gwas_palette <- c(get_pal("Tui")[1:5], "#B865A1", "#6AA086")
+# gwas_palette <- sort(gwas_palette)
+
+## use this version on server
+gwas_palette <- c("#115896", "#4C4C53", "#6AA086", "#7ACCD7", "#7C6C65", "#B865A1", "#BA2F00")
+```
+
+
+In the results section "loci with heterogeneous effects across ancestries" there could be benefit from performing the same analysis in the sex-specific GWASs.
+
+
+  + Load loci files
+
+```{r finalised_loci_files}
+# load saved files when repeating plotting steps
+today <- "30Sept2022"
+loci_summary <- list()
+
+for(set in c("full", "male", "female")){
+  loci_summary[[set]] <- read.delim(paste0("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/loci_list/", set, "_loci_summary_updated_", today, "_withLD.txt"), header = TRUE)
+  loci_summary[[paste0(set, "_SNPs")]] <- read.delim(paste0("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/loci_list/", set, "_indepSNP_summary_updated_", today, ".txt"), header = TRUE)
+}
+rm(set, today)
+```
+
+
+
+  + Create list of all unique SNPs
+
+```{r create_snp_lists, eval = FALSE}
+full_SNPlist <- data.frame(SNP = loci_summary[["full_SNPs"]][, "SNP"], full = "Yes")
+female_SNPlist <- data.frame(SNP = loci_summary[["female_SNPs"]][, "SNP"], female = "Yes")
+male_SNPlist <- data.frame(SNP = loci_summary[["male_SNPs"]][, "SNP"], male = "Yes")
+
+SNPlist <- merge(full_SNPlist, male_SNPlist, by = "SNP", all = TRUE)
+SNPlist <- merge(SNPlist, female_SNPlist, by = "SNP", all = TRUE)
+SNPlist[is.na(SNPlist)] = "No"
+
+rm(full_SNPlist, female_SNPlist, male_SNPlist)
+```
+
+
+  + Save lead SNP list for extraction from GWAS results files
+
+```{r save_snp_list, eval = FALSE}
+write.table(SNPlist[, "SNP"], file = "PostGWAS_Repo/results/Heterogeneity/lead_SNPs.list", quote = FALSE, sep = "\t", na = "", row.names = FALSE, col.names = FALSE)
+rm(SNPlist)
+```
+
+
+  + Extract lead SNPs from ALL GWAS results files
+
+
+```{bash extract_snp_list, eval = FALSE}
+for pop in $(echo AFR EAS EUR LAT TAMA);
+  do
+    for set in $(echo full male female);
+      do
+        if [ "${pop}" = "TAMA" ]; then
+          head -1 /Volumes/archive/merrimanlab/major_gwas_paper_archive/results_meta_analysis/${pop}/${set}/tama_${set}_clean.nfiltered.biallelic.txt > PostGWAS_Repo/results/Heterogeneity/${pop}_${set}_clean.nfiltered.biallelic.leadSNPs.txt
+          grep -Fwf PostGWAS_Repo/results/Heterogeneity/lead_SNPs.list /Volumes/archive/merrimanlab/major_gwas_paper_archive/results_meta_analysis/${pop}/${set}/tama_${set}_clean.nfiltered.biallelic.txt >> PostGWAS_Repo/results/Heterogeneity/${pop}_${set}_clean.nfiltered.biallelic.leadSNPs.txt
+        else
+          head -1 /Volumes/archive/merrimanlab/major_gwas_paper_archive/results_meta_analysis/${pop}/${set}/${pop}_meta_${set}1_clean_rsid.nfiltered.biallelic.txt > PostGWAS_Repo/results/Heterogeneity/${pop}_${set}_clean.nfiltered.biallelic.leadSNPs.txt
+          grep -Fwf PostGWAS_Repo/results/Heterogeneity/lead_SNPs.list /Volumes/archive/merrimanlab/major_gwas_paper_archive/results_meta_analysis/${pop}/${set}/${pop}_meta_${set}1_clean_rsid.nfiltered.biallelic.txt >> PostGWAS_Repo/results/Heterogeneity/${pop}_${set}_clean.nfiltered.biallelic.leadSNPs.txt;
+        fi
+      done
+  done
+```
+
+
+  + Load lead SNPs from ALL GWAS results files
+
+
+```{r load_snp_list}
+SNP_results <- list()
+for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+  for(set in c("full", "male", "female")){
+    SNP_results[[paste(pop, set, sep = "_")]] <- read.delim(paste0("PostGWAS_Repo/results/Heterogeneity/", pop, "_", set, "_clean.nfiltered.biallelic.leadSNPs.txt"), header = TRUE)
+  }
+  rm(set)
+}
+rm(pop)
+```
+
+
+  + Add Q-statistic p-value (or PPA value for TAMA) to SNP summary files (if possible)
+
+```{r add_per-pop_Qstat}
+for(set in c("full", "male", "female")){
+  snp_summary <- loci_summary[[paste0(set, "_SNPs")]]
+  col_order <- names(snp_summary)
+
+  for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+    het_results <- SNP_results[[paste0(pop, "_", set)]]
+
+    if(pop == "TAMA"){
+      het_results <- het_results[, c("SNP", "PPA")]
+      names(het_results)[2] <- "HetPPA_TAMA"
+    } else{
+      het_results <- het_results[, c("SNP", "HetPVal")]
+      names(het_results)[2] <- paste0("HetQ_", pop)
+    }
+
+    snp_summary <- merge(snp_summary, het_results, by = "SNP", all.x = TRUE)
+    rm(het_results)
+  }
+  rm(pop)
+
+  if(set == "full"){
+    snp_summary <- snp_summary[order(snp_summary$CHR, snp_summary$BP), c(col_order[1:19], "HetQ_AFR", col_order[20:26], "HetQ_EAS", col_order[27:33], "HetQ_EUR", col_order[34:40], "HetQ_LAT", col_order[41:43], "HetPPA_TAMA")]
+  } else{
+    snp_summary <- snp_summary[order(snp_summary$CHR, snp_summary$BP), c(col_order[1:20], "HetQ_AFR", col_order[21:27], "HetQ_EAS", col_order[28:34], "HetQ_EUR", col_order[35:41], "HetQ_LAT", col_order[42:44], "HetPPA_TAMA")]
+  }
+
+  loci_summary[[paste0(set, "_SNPs")]] <- snp_summary
+  rm(snp_summary, col_order)
+}
+rm(set)
+```
+
+
+
+  + Meta-analyse male-only/female-only versions of each population
+
+```{r meta_analyse}
+for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+  male_results <- SNP_results[[paste0(pop, "_male")]]
+  female_results <- SNP_results[[paste0(pop, "_female")]]
+
+  male_results$source = "male"
+  female_results$source = "female"
+
+  all_results <- rbind(male_results, female_results)
+
+  if(pop == "TAMA"){
+      paired_snps <- all_results$SNP[duplicated(all_results[, c("SNP", "REF", "OTH")])]
+      merge_results <- merge(male_results, female_results, by = c("SNP", "CHR", "POS", "REF", "OTH"), all = TRUE, suffixes = c(".male", ".female"))
+  } else{
+      paired_snps <- all_results$SNP[duplicated(all_results[, c("SNP", "minor", "major")])]
+      merge_results <- merge(male_results, female_results, by = c("SNP", "CHR", "BP", "minor", "major"), all = TRUE, suffixes = c(".male", ".female"))
+  }
+
+  merge_results[, c("effect.meta", "se.meta", "p.meta", "hetQ.meta")] = NA
+
+  for(snp in paired_snps){
+    if(pop == "TAMA"){
+      meta = metagen(TE = all_results[all_results$SNP == snp, "weighted_effect"], seTE = all_results[all_results$SNP == snp, "weighted_effect_sd"], studlab = all_results[all_results$SNP == snp, "source"], sm = "OR")
+    } else{
+      meta = metagen(TE = all_results[all_results$SNP == snp, "effect"], seTE = all_results[all_results$SNP == snp, "SE"], studlab = all_results[all_results$SNP == snp, "source"], sm = "OR")
+    }
+
+    merge_results[merge_results$SNP == snp, c("effect.meta", "se.meta", "p.meta", "hetQ.meta")] = meta[c("TE.fixed", "seTE.fixed", "pval.fixed", "pval.Q")]
+    rm(meta)
+  }
+  rm(snp)
+
+  if(pop == "TAMA"){
+    SNP_results[[paste0(pop, "_merged")]] <- merge_results[order(merge_results$CHR, merge_results$POS), ]
+  } else{
+    SNP_results[[paste0(pop, "_merged")]] <- merge_results[order(merge_results$CHR, merge_results$BP), ]
+  }
+
+  rm(merge_results, male_results, female_results, all_results, paired_snps)
+}
+rm(pop)
+```
+
+
+  + Add meta-analysis heterogeneity to loci files
+
+```{r add_heterogeneity}
+for(set in c("full", "male", "female")){
+  loci_SNPs <- loci_summary[[paste0(set, "_SNPs")]]
+  column_order <- names(loci_SNPs)
+
+  for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+    merge_results <- SNP_results[[paste0(pop, "_merged")]]
+
+    loci_SNPs <- merge(loci_SNPs, merge_results[, c("SNP", "hetQ.meta")], by = "SNP", all.x = TRUE)
+    names(loci_SNPs)[ncol(loci_SNPs)] <- paste0("HetQ.MF_", pop)
+    rm(merge_results)
+  }
+  rm(pop)
+
+  if(set == "full"){
+    loci_SNPs <- loci_SNPs[, c(column_order[1:20], "HetQ.MF_AFR", column_order[21:28], "HetQ.MF_EAS", column_order[29:36], "HetQ.MF_EUR", column_order[37:44], "HetQ.MF_LAT", column_order[45:48], "HetQ.MF_TAMA")]
+  } else {
+    loci_SNPs <- loci_SNPs[, c(column_order[1:21], "HetQ.MF_AFR", column_order[22:29], "HetQ.MF_EAS", column_order[30:37], "HetQ.MF_EUR", column_order[38:45], "HetQ.MF_LAT", column_order[46:49], "HetQ.MF_TAMA")]
+  }
+
+  loci_SNPs <- loci_SNPs[order(loci_SNPs$CHR, loci_SNPs$BP), ]
+
+  loci_summary[[paste0(set, "_SNPs")]] <- loci_SNPs
+
+  rm(loci_SNPs, column_order)
+}
+rm(set)
+```
+
+
+  + Identify heterogeneous loci - based on cohort (or ancestry if from TAMA)
+  + Identify heterogeneous loci - based on sex
+
+Heterogeneity classified as PPH > 90% or P < 1e-6
+
+
+```{r identify heterogeneity}
+heterogeneous_SNPs <- list()
+
+for(set in c("full", "male", "female")){
+  loci_SNPs <- loci_summary[[paste0(set, "_SNPs")]]
+
+  ancest_het <- loci_SNPs[loci_SNPs$HetPPA_TAMA > 0.9 & !is.na(loci_SNPs$HetPPA_TAMA), ]
+
+  for(pop in c("EAS", "AFR", "EUR", "LAT", "TAMA")){
+
+    # cohort based heterogeneity
+    if(pop != "TAMA"){
+      cohort_het <- loci_SNPs[loci_SNPs[, paste0("HetQ_", pop)] < 1e-6 & !is.na(loci_SNPs[, paste0("HetQ_", pop)]) & loci_SNPs[, pop] != "", ]
+      if(nrow(cohort_het) > 0){
+        cohort_het$Het_pop <- pop
+      }
+
+      if(exists("cohort_het_rbind")){
+        cohort_het_rbind <- rbind(cohort_het_rbind, cohort_het)
+      } else{
+        cohort_het_rbind <- cohort_het
+      }
+      rm(cohort_het)
+    }
+
+    # sex based heterogeneity
+    sex_het <- loci_SNPs[loci_SNPs[, paste0("HetQ.MF_", pop)] < 1e-6 & !is.na(loci_SNPs[, paste0("HetQ.MF_", pop)]) & loci_SNPs[, pop] != "", ]
+    if(nrow(sex_het) > 0){
+      sex_het$Het_pop <- pop
+    }
+
+    if(exists("sex_het_rbind")){
+        sex_het_rbind <- rbind(sex_het_rbind, sex_het)
+    } else{
+      sex_het_rbind <- sex_het
+    }
+    rm(sex_het)
+
+  }
+
+  heterogeneous_SNPs[[paste0(set, "_ancest")]] <- ancest_het
+  heterogeneous_SNPs[[paste0(set, "_cohort")]] <- cohort_het_rbind[order(cohort_het_rbind$CHR, cohort_het_rbind$BP), ]
+  heterogeneous_SNPs[[paste0(set, "_sex")]] <- sex_het_rbind[order(sex_het_rbind$CHR, sex_het_rbind$BP), ]
+
+  rm(pop, loci_SNPs, cohort_het_rbind, sex_het_rbind, ancest_het)
+}
+rm(set)
+```
+
+
+  + Identify SNPs with non-overlapping male/female confidence intervals (+ Q-stat P-value < 1e-6)
+
+```{r overlap_CI}
+nonoverlapping <- list()
+for(pop in c("AFR", "EAS", "EUR", "LAT", "TAMA")){
+  merged_data <- SNP_results[[paste0(pop, "_merged")]]
+
+  if(pop == "TAMA"){
+    merged_data <- merged_data[, c("SNP", "CHR", "POS", "REF", "OTH", "weighted_effect.male", "weighted_effect_sd.male", "logBF.male", "weighted_effect.female", "weighted_effect_sd.female", "logBF.female", "effect.meta", "se.meta", "p.meta", "hetQ.meta")]
+    names(merged_data)[c(3:7, 9:10, 13)] <- c("BP", "Allele1", "Allele2", "effect.male", "SE.male", "effect.female", "SE.female", "SE.meta")
+  } else{
+    merged_data <- merged_data[, c("SNP", "CHR", "BP", "minor", "major", "effect.male", "SE.male", "log10P.male", "effect.female", "SE.female", "log10P.female", "effect.meta", "se.meta", "p.meta", "hetQ.meta")]
+    names(merged_data)[c(4:5, 13)] <- c("Allele1", "Allele2", "SE.meta")
+  }
+
+  merged_data$LCI.male <- merged_data$effect.male - 1.96 * merged_data$SE.male
+  merged_data$UCI.male <- merged_data$effect.male + 1.96 * merged_data$SE.male
+  merged_data$LCI.female <- merged_data$effect.female - 1.96 * merged_data$SE.female
+  merged_data$UCI.female <- merged_data$effect.female + 1.96 * merged_data$SE.female
+
+  merged_data$overlap = (merged_data$UCI.female < merged_data$LCI.male | merged_data$UCI.male < merged_data$LCI.female)
+
+  for(set in c("full", "male", "female")){
+    loci_info <- loci_summary[[set]]
+    snp_list <- loci_info[loci_info[, pop] != "", pop]
+
+    pop_data <- merged_data[merged_data$SNP %in% snp_list & merged_data$overlap & merged_data$hetQ.meta < 1e-6 & !is.na(merged_data$hetQ.meta), ]
+    if(nrow(pop_data > 0)){
+      pop_data$POP = pop
+      nonoverlapping[[paste0(pop, "_", set)]] <- pop_data
+    }
+    rm(loci_info, snp_list, pop_data)
+  }
+  SNP_results[[paste0(pop, "_merged2")]] <- merged_data
+  rm(merged_data, set)
+}
+rm(pop)
+```
+
+
+
+  + Add locus info to non-overlapping files
+
+
+```{r locus_nonoverlapping}
+for(set in c("full", "male", "female")){
+
+  # merge in locus info
+  locus_info <- loci_summary[[paste0(set, "_SNPs")]]
+
+  for(pop in c("EAS", "EUR", "LAT")){
+    het_results <- nonoverlapping[[paste0(pop, "_", set)]]
+    pop_locus_info <- locus_info[, names(locus_info) %in% c("locus", "Main_GWAS_loci", "CHR", "BP", "SNP", "SEX", paste0(c("MAF_", "FreqSE_", "OR_", "SE_", "P_", "log10P_"), pop))]
+
+    het_results <- merge(het_results, pop_locus_info, by = c("CHR", "BP", "SNP"), all.x = TRUE)
+
+    if(set == "full"){
+      names(het_results)[24:29] <- c("MAF", "FreqSE", "OR", "SE", "P", "log10P")
+    } else{
+      names(het_results)[25:30] <- c("MAF", "FreqSE", "OR", "SE", "P", "log10P")
+    }
+
+    # concatenate pop-based results
+    if(exists("bound_set")){
+      bound_set <- rbind(bound_set, het_results)
+    } else{
+      bound_set <- het_results
+    }
+    rm(het_results, pop_locus_info)
+  }
+  rm(pop)
+
+    # TAMA set
+    het_results <- nonoverlapping[[paste0("TAMA_", set)]]
+    pop_locus_info <- locus_info[, names(locus_info) %in% c("locus", "Main_GWAS_loci", "CHR", "BP", "SNP", "SEX", paste0(c("OR_", "SE_", "logBF_"), "TAMA"))]
+
+    het_results <- merge(het_results, pop_locus_info, by = c("CHR", "BP", "SNP"), all.x = TRUE)
+    het_results[, c("MAF", "FreqSE", "P")] <- NA
+
+    if(set == "full"){
+      names(het_results)[24:26] <- c("OR", "SE", "logBF")
+    } else{
+      names(het_results)[25:27] <- c("OR", "SE", "logBF")
+    }
+
+    names(het_results) <- gsub(names(het_results), pattern = "logBF", replacement = "log10P")
+
+  bound_set <- rbind(bound_set, het_results[, names(bound_set)])
+  rm(het_results, pop_locus_info, locus_info)
+
+  nonoverlapping[[paste0(set, "_summary")]] <- bound_set
+  rm(bound_set)
+}
+rm(set)
+```
+
+
+```{r save_hetergeneous_SNPs}
+for(set in c("full", "male", "female")){
+  write.table(nonoverlapping[[paste0(set, "_summary")]], file = paste0("/Volumes/scratch/merrimanlab/tanya/GWAS_Paper/PostGWAS_Repo/results/Heterogeneity/", set, "_sex_heterogeneous.txt"), quote = FALSE, sep = "\t", na = "", row.names = FALSE)
+}
+rm(set)
+```
+
+
+```{r heterogeneity_venn}
+male <- nonoverlapping[["male_summary"]]
+male$Main_GWAS_loci[male$Main_GWAS_loci == "Unique to male GWAS"] <- male$locus[male$Main_GWAS_loci == "Unique to male GWAS"]
+
+female <- nonoverlapping[["female_summary"]]
+female$Main_GWAS_loci[female$Main_GWAS_loci == "Unique to female GWAS"] <- female$locus[female$Main_GWAS_loci == "Unique to female GWAS"]
+
+venn_input <- list(full = nonoverlapping[["full_summary"]]$locus, male = male$Main_GWAS_loci, female = female$Main_GWAS_loci)
+
+rm(male, female)
+
+venn.diagram(x = venn_input, fill = gwas_palette[1:3], alpha = 0.3, main = "Overlapping Heterogeneous Loci/Independent Signals", filename = "PostGWAS_Repo/results/Heterogeneity/hetLOCI_sex-overlap.png", imagetype = "png", height = 4, width = 4, resolution = 300, units = "in")
+
+rm(venn_input)
+system(command = paste0("rm PostGWAS_Repo/results/Heterogeneity/hetLOCI_sex-overlap.png*.log"))
+```
+
+
+
+
