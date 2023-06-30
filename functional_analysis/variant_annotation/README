@@ -60,6 +60,7 @@ Rscript make_fathmm_abc_input.R
 # ABC
 
 # Overlap the input data with Activity-by-contact (ABC) data
+# (also refer to `abc_scripts/`)
 #
 # DATA = input data for ABC overlap
 # OUT = output name

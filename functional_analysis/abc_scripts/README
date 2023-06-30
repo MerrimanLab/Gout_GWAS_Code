@@ -1,0 +1,17 @@
+################################################################################
+
+# This directory contains the scripts for overlapping ABC regions with specific
+# results (eQTL/meQTL)
+
+################################################################################
+# eQTL/meQTL-ABC region overlap
+
+# Below is a generic script to overlap the input data with Activity-by-contact
+# (ABC) data (also used in `variant_annotation/`)
+#
+# eQTL or meQTL results were used as the input
+#
+# DATA = input data for ABC overlap
+# OUT = output name
+Rscript abc_model_overlap.R DATA OUT
+

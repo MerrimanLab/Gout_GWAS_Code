@@ -1,0 +1,26 @@
+################################################################################
+
+# This directory contains the scripts for transcription factor binding site
+# enrichment analysis
+
+################################################################################
+# Transcription factor binding site (TFBS) enrichment analysis
+
+# This analysis was done to see if any of the cpg sites that showed colocalised
+# meQTL with the gout GWAS. In other words, when a gout variant had evidence of
+# altering the methylation level of a cpg site, was there any enrichment of TFs
+# that bound to the area surrounding the cpg site?
+#
+# TF information was taken from the RELI (ChIP-seq) data set.
+#
+# A simple contingency table was generate for each TF in question, comparing
+# the number of TF bound to the cpg sites that were colocalised or not (i.e. TF
+# binding/not binding vs. cpg colocalised/not colocalised).
+
+# Pull out all cpg sites available from the GoDMC data - enrichment will be
+# assesed by comparing the TF binding with this baseline:
+bash get_godmc_cpg.sh
+
+# Run the enrichment analysis for all of the TFs
+Rscript tfbs_fisher.R
+functions.R
