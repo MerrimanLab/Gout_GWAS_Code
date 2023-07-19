@@ -1,0 +1,38 @@
+################################################################################
+
+# This directory contains the scripts for our gene prioritisation using
+# gene-function and function-agnostic criteria
+
+################################################################################
+
+# The gene prioritisation was done by overlapping seven criteria:
+# 1. Having an eQTL co-localized with GWAS signal in whole blood
+# 2. Having an eQTL in monocytes (ImmuNexUT or OneK1K datasets)
+# 3. Within a locus with a co-localized meQTL
+# 4. Within a locus with gout association signal that also genetically
+#    associates with one or more of 36 blood cell traits (using phenoscanner
+#    in R to query the PhenoScanner database)
+# 5. Differentially expressed in gout
+# 6. Expressed in GTEx whole blood tissue as >0.1 average transcript per million
+# 7. Differentially expressed in monocytes stimulated with MSU crystals and/or
+#    lipopolysaccharide (LPS) (LPS vs MSU crystal, LPS vs phosphate-buffered
+#    saline control, MSU crystal vs PBS control)
+#
+# And then scored again based on three criteria:
+# 1. One of 47 genes containing a strong candidate missense causal variant
+# 2. One of the 385 target genes of the activity-by-contact enhancer
+# 3. Gene with FANTOM5 transcription start site (TSS) closest to the lead SNP
+
+################################################################################
+# Pull relevant data from ImmuNexUT and OneK1k data sets:
+bash pull_onek1k.sh
+bash pull_immunexut.sh
+
+# Clean up FANTOM5 TSS information
+Rscript clean_tss.R
+
+# Combine the supplemental table sheets from Cobo et al.
+Rscript combine_cobo.R
+
+# Score the genes based on the criteria described above
+Rscript gene_prioritisation.R
