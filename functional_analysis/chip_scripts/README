@@ -1,0 +1,13 @@
+################################################################################
+
+# This directory contains the scripts for our CHIP analysis
+
+################################################################################
+
+# Script to test the enrichment of 71 CHIP genes in the prioritisation table
+Rscript chip_gene_enr.R
+
+# R markdown document of two-sample MR of gout and CHIP
+CHIP_MR_code.Rmd
+
+################################################################################

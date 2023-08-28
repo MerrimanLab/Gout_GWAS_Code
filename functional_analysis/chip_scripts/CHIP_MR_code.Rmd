@@ -1,0 +1,1103 @@
+---
+title: "CHIP_MR_code"
+output: html_document
+date: "2023-08-25"
+---
+
+```{r setup, message = F, warning = F}
+# Loading libraries.
+library(MendelianRandomization)
+# devtools::install_github("G-Thomson/Manu")
+library(Manu)
+# devtools::install_github("qingyuanzhao/mr.raps")
+library(mr.raps)
+library(ggpubr)
+library(rtracklayer)
+library(fs)
+library(tidyverse)
+
+# Setting GWAS colour palette (Tui + two Kereru). For outlines, things in black etc use "#21282F". When a plot only needs 1/2 colours use the first ones in the list this creates
+gwas_palette <- c(get_pal("Tui")[1:5], "#B865A1", "#6AA086")
+gwas_palette <- sort(gwas_palette)
+
+# Setting path.
+path1 <- fs::path("~/Library/CloudStorage/OneDrive-UAB-TheUniversityofAlabamaatBirmingham/Documents/PostDoc/Projects/Major GWAS Revisions/CHIP_MR")
+#path1 <- fs::path("/Users/nick_/OneDrive - UAB - The University of Alabama at Birmingham/Documents/PostDoc/Projects/Major GWAS Revisions/CHIP_MR")
+```
+
+### Filtering summary stats (Biochemistry server)
+
+First, I downloaded, uncompressed, and renamed the summary statistics for the four GWAS of interest.
+
+```{bash, eval = F}
+# Setting archive path variable.
+ARCHIVE_PATH=/Volumes/archive/merrimanlab/Nick/Major_GWAS/CHIP_MR_Revised
+SCRATCH_PATH=/Volumes/scratch/merrimanlab/Nick/Major_GWAS/CHIP_MR_Revised
+
+# Downloading summary stats from Kessler et al 2022.
+wget http://ftp.ebi.ac.uk/pub/databases/gwas/summary_statistics/GCST90165001-GCST90166000/GCST90165261/GCST90165261_buildGRCh38.tsv.gz -P $SCRATCH_PATH/Data/sumstats
+wget http://ftp.ebi.ac.uk/pub/databases/gwas/summary_statistics/GCST90165001-GCST90166000/GCST90165267/GCST90165267_buildGRCh38.tsv.gz -P $SCRATCH_PATH/Data/sumstats
+wget http://ftp.ebi.ac.uk/pub/databases/gwas/summary_statistics/GCST90165001-GCST90166000/GCST90165271/GCST90165271_buildGRCh38.tsv.gz -P $SCRATCH_PATH/Data/sumstats
+wget http://ftp.ebi.ac.uk/pub/databases/gwas/summary_statistics/GCST90165001-GCST90166000/GCST90165281/GCST90165281_buildGRCh38.tsv.gz -P $SCRATCH_PATH/Data/sumstats
+
+# Unzipping summary stats.
+gunzip $SCRATCH_PATH/Data/sumstats/*
+
+# Renaming summary stats.
+mv $SCRATCH_PATH/Data/sumstats/GCST90165261_buildGRCh38.tsv $SCRATCH_PATH/Data/sumstats/CHIP_exclusive_EUR_GCST90165261_b38.tsv
+mv $SCRATCH_PATH/Data/sumstats/GCST90165267_buildGRCh38.tsv $SCRATCH_PATH/Data/sumstats/CHIP_inclusive_EUR_GCST90165267_b38.tsv
+mv $SCRATCH_PATH/Data/sumstats/GCST90165271_buildGRCh38.tsv $SCRATCH_PATH/Data/sumstats/DNMT3A_CHIP_EUR_GCST90165271_b38.tsv
+mv $SCRATCH_PATH/Data/sumstats/GCST90165281_buildGRCh38.tsv $SCRATCH_PATH/Data/sumstats/TET2_CHIP_EUR_GCST90165281_b38.tsv
+```
+
+Next, I converted the coordinates from build 38 to build 37 of the human genome.
+
+```{bash, eval = F}
+# Extracting b38 coordinates in bed file format.
+cat $SCRATCH_PATH/Data/sumstats/CHIP_exclusive_EUR_GCST90165261_b38.tsv | tail -n+2 | cut -f 2,3 | awk '{print "chr"$1,$2-1,$2,"line"NR}' FS='\t' OFS='\t' > $SCRATCH_PATH/Output/Temp/sumstat1.bed
+cat $SCRATCH_PATH/Data/sumstats/CHIP_inclusive_EUR_GCST90165267_b38.tsv | tail -n+2 | cut -f 2,3 | awk '{print "chr"$1,$2-1,$2,"line"NR}' FS='\t' OFS='\t' > $SCRATCH_PATH/Output/Temp/sumstat2.bed
+cat $SCRATCH_PATH/Data/sumstats/DNMT3A_CHIP_EUR_GCST90165271_b38.tsv | tail -n+2 | cut -f 2,3 | awk '{print "chr"$1,$2-1,$2,"line"NR}' FS='\t' OFS='\t' > $SCRATCH_PATH/Output/Temp/sumstat3.bed
+cat $SCRATCH_PATH/Data/sumstats/TET2_CHIP_EUR_GCST90165281_b38.tsv | tail -n+2 | cut -f 2,3 | awk '{print "chr"$1,$2-1,$2,"line"NR}' FS='\t' OFS='\t' > $SCRATCH_PATH/Output/Temp/sumstat4.bed
+
+# Downloading liftOver and the appropriate chain file.
+# wget https://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64/liftOver -P $ARCHIVE_PATH/Script/Tools
+# chmod +x $ARCHIVE_PATH/Script/Tools/liftOver
+
+# wget http://hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/hg38ToHg19.over.chain.gz -P $ARCHIVE_PATH/Script/Tools
+# gunzip $ARCHIVE_PATH/Script/Tools/hg38ToHg19.over.chain.gz
+
+# Running liftOver.
+$ARCHIVE_PATH/Script/Tools/liftOver $SCRATCH_PATH/Output/Temp/sumstat1.bed $ARCHIVE_PATH/Script/Tools/hg38ToHg19.over.chain $SCRATCH_PATH/Output/Temp/lifted_sumstat1.bed $SCRATCH_PATH/Output/Temp/unlifted_sumstat1.bed
+$ARCHIVE_PATH/Script/Tools/liftOver $SCRATCH_PATH/Output/Temp/sumstat2.bed $ARCHIVE_PATH/Script/Tools/hg38ToHg19.over.chain $SCRATCH_PATH/Output/Temp/lifted_sumstat2.bed $SCRATCH_PATH/Output/Temp/unlifted_sumstat2.bed
+$ARCHIVE_PATH/Script/Tools/liftOver $SCRATCH_PATH/Output/Temp/sumstat3.bed $ARCHIVE_PATH/Script/Tools/hg38ToHg19.over.chain $SCRATCH_PATH/Output/Temp/lifted_sumstat3.bed $SCRATCH_PATH/Output/Temp/unlifted_sumstat3.bed
+$ARCHIVE_PATH/Script/Tools/liftOver $SCRATCH_PATH/Output/Temp/sumstat4.bed $ARCHIVE_PATH/Script/Tools/hg38ToHg19.over.chain $SCRATCH_PATH/Output/Temp/lifted_sumstat4.bed $SCRATCH_PATH/Output/Temp/unlifted_sumstat4.bed
+
+# Adding the new coordinates to the original summary statistics files then adding the new header line.
+join -1 1 -2 1 -t $'\t' <(cat $SCRATCH_PATH/Data/sumstats/CHIP_exclusive_EUR_GCST90165261_b38.tsv | \
+                          tail -n+2 | \
+                          awk '{print "line"NR,$0}' FS='\t' OFS='\t' | sort) \
+                        <(cat $SCRATCH_PATH/Output/Temp/lifted_sumstat1.bed | \
+                          awk '{print $4,$1,$3}' FS='\t' OFS='\t' | sort) > $SCRATCH_PATH/Output/Temp/sumstat1_with_b37.tsv
+
+cat <(paste <(echo "linenumber") \
+            <(head -1 $SCRATCH_PATH/Data/sumstats/CHIP_exclusive_EUR_GCST90165261_b38.tsv) \
+            <(echo "CHR") \
+            <(echo "b37_coord")) \
+    <(cat $SCRATCH_PATH/Output/Temp/sumstat1_with_b37.tsv) > $SCRATCH_PATH/Data/sumstats/CHIP_exclusive_EUR_GCST90165261_b38_with_b37.tsv
+
+join -1 1 -2 1 -t $'\t' <(cat $SCRATCH_PATH/Data/sumstats/CHIP_inclusive_EUR_GCST90165267_b38.tsv | \
+                          tail -n+2 | \
+                          awk '{print "line"NR,$0}' FS='\t' OFS='\t' | sort) \
+                        <(cat $SCRATCH_PATH/Output/Temp/lifted_sumstat2.bed | \
+                          awk '{print $4,$1,$3}' FS='\t' OFS='\t' | sort) > $SCRATCH_PATH/Output/Temp/sumstat2_with_b37.tsv
+
+cat <(paste <(echo "linenumber") \
+            <(head -1 $SCRATCH_PATH/Data/sumstats/CHIP_inclusive_EUR_GCST90165267_b38.tsv) \
+            <(echo "CHR") \
+            <(echo "b37_coord")) \
+    <(cat $SCRATCH_PATH/Output/Temp/sumstat2_with_b37.tsv) > $SCRATCH_PATH/Data/sumstats/CHIP_inclusive_EUR_GCST90165267_b38_with_b37.tsv
+
+join -1 1 -2 1 -t $'\t' <(cat $SCRATCH_PATH/Data/sumstats/DNMT3A_CHIP_EUR_GCST90165271_b38.tsv | \
+                          tail -n+2 | \
+                          awk '{print "line"NR,$0}' FS='\t' OFS='\t' | sort) \
+                        <(cat $SCRATCH_PATH/Output/Temp/lifted_sumstat3.bed | \
+                          awk '{print $4,$1,$3}' FS='\t' OFS='\t' | sort) > $SCRATCH_PATH/Output/Temp/sumstat3_with_b37.tsv
+
+cat <(paste <(echo "linenumber") \
+            <(head -1 $SCRATCH_PATH/Data/sumstats/DNMT3A_CHIP_EUR_GCST90165271_b38.tsv) \
+            <(echo "CHR") \
+            <(echo "b37_coord")) \
+    <(cat $SCRATCH_PATH/Output/Temp/sumstat3_with_b37.tsv) > $SCRATCH_PATH/Data/sumstats/DNMT3A_CHIP_EUR_GCST90165271_b38_with_b37.tsv
+
+join -1 1 -2 1 -t $'\t' <(cat $SCRATCH_PATH/Data/sumstats/TET2_CHIP_EUR_GCST90165281_b38.tsv | \
+                          tail -n+2 | \
+                          awk '{print "line"NR,$0}' FS='\t' OFS='\t' | sort) \
+                        <(cat $SCRATCH_PATH/Output/Temp/lifted_sumstat4.bed | \
+                          awk '{print $4,$1,$3}' FS='\t' OFS='\t' | sort) > $SCRATCH_PATH/Output/Temp/sumstat4_with_b37.tsv
+
+cat <(paste <(echo "linenumber") \
+            <(head -1 $SCRATCH_PATH/Data/sumstats/TET2_CHIP_EUR_GCST90165281_b38.tsv) \
+            <(echo "CHR") \
+            <(echo "b37_coord")) \
+    <(cat $SCRATCH_PATH/Output/Temp/sumstat4_with_b37.tsv) > $SCRATCH_PATH/Data/sumstats/TET2_CHIP_EUR_GCST90165281_b38_with_b37.tsv
+```
+
+I then filtered the summary stats to only include SNPs that were both tested in the Gout GWAS and present in the UK Biobank imputed genotype files.
+
+```{bash, eval = F}
+# Determining SNPs tested in both GWAS that are also in UK Biobank.
+# Extracting chromosome and BP for each SNP in EUR gout GWAS.
+cut -f 1,2 /Volumes/archive/merrimanlab/major_gwas_paper_archive/results_meta_analysis/EUR/full/EUR_meta_full1_clean_rsid.nfiltered.biallelic.txt > $SCRATCH_PATH/Output/Temp/Gout_GWAS_CHR_BP.tsv
+
+# Extracting chromosome and BP for each SNP in the UK Biobank.
+for i in {1..22}
+do
+cat /Volumes/archive/merrimanlab_nobackup/ukbio/EGAD00010001474/ukb_mfi_chr${i}_v3.txt | awk -v CHR="$i" '{print CHR,$3}' FS='\t' OFS='\t' > $SCRATCH_PATH/Output/Temp/ukb_chr${i}_CHR_BP.tsv
+done
+
+cat $SCRATCH_PATH/Output/Temp/ukb_chr*_CHR_BP.tsv > $SCRATCH_PATH/Output/Temp/ukb_CHR_BP.tsv
+
+# Finding the SNPs present in both the UK Biobank and Gout GWAS.
+grep -Fwf $SCRATCH_PATH/Output/Temp/ukb_CHR_BP.tsv $SCRATCH_PATH/Output/Temp/Gout_GWAS_CHR_BP.tsv > $SCRATCH_PATH/Output/Temp/UKB_and_Gout_GWAS_CHR_BP.tsv
+
+# Extracting the chromosome and BP for each SNP in each CHIP GWAS.
+cat $SCRATCH_PATH/Data/sumstats/CHIP_exclusive_EUR_GCST90165261_b38_with_b37.tsv | cut -f 3,25 > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_CHR_BP.tsv
+cat $SCRATCH_PATH/Data/sumstats/CHIP_inclusive_EUR_GCST90165267_b38_with_b37.tsv | cut -f 3,25 > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_CHR_BP.tsv
+cat $SCRATCH_PATH/Data/sumstats/DNMT3A_CHIP_EUR_GCST90165271_b38_with_b37.tsv | cut -f 3,25 > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_CHR_BP.tsv
+cat $SCRATCH_PATH/Data/sumstats/TET2_CHIP_EUR_GCST90165281_b38_with_b37.tsv | cut -f 3,25 > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_CHR_BP.tsv
+
+# Finding the SNPs present in the UK Biobank and Gout GWAS that are also present in each CHIP GWAS.
+grep -Fwf $SCRATCH_PATH/Output/Temp/UKB_and_Gout_GWAS_CHR_BP.tsv $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_CHR_BP.tsv > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_CHR_BP_Final.tsv
+grep -Fwf $SCRATCH_PATH/Output/Temp/UKB_and_Gout_GWAS_CHR_BP.tsv $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_CHR_BP.tsv > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_CHR_BP_Final.tsv
+grep -Fwf $SCRATCH_PATH/Output/Temp/UKB_and_Gout_GWAS_CHR_BP.tsv $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_CHR_BP.tsv > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_CHR_BP_Final.tsv
+grep -Fwf $SCRATCH_PATH/Output/Temp/UKB_and_Gout_GWAS_CHR_BP.tsv $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_CHR_BP.tsv > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_CHR_BP_Final.tsv
+
+# Filtering the summary statistics files to keep SNPs identified above.
+cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_CHR_BP_Final.tsv | tr '\t' '_' > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_CHR_BP_Final2.tsv
+cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_CHR_BP_Final.tsv | tr '\t' '_' > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_CHR_BP_Final2.tsv
+cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_CHR_BP_Final.tsv | tr '\t' '_' > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_CHR_BP_Final2.tsv
+cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_CHR_BP_Final.tsv | tr '\t' '_' > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_CHR_BP_Final2.tsv
+
+grep -Fwf $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_CHR_BP_Final2.tsv \
+          <(cat $SCRATCH_PATH/Data/sumstats/CHIP_exclusive_EUR_GCST90165261_b38_with_b37.tsv | \
+            cut -f 3,5,6,10,11,12,13,25 | \
+            awk '{print $1 "_" $8,$1,$8,$2,$3,$4,$5,$6,$7}' FS='\t' OFS='\t') > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS1.tsv
+
+cat <(head -1 $SCRATCH_PATH/Data/sumstats/CHIP_exclusive_EUR_GCST90165261_b38_with_b37.tsv | \
+      cut -f 3,5,6,10,11,12,13,25 | \
+      awk '{print $1 "_" $8,$1,$8,$2,$3,$4,$5,$6,$7}' FS='\t' OFS='\t') \
+    <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS1.tsv) | \
+    sort -nk2,2 -nk3,3 | uniq > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS2.tsv
+
+grep -Fwf $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_CHR_BP_Final2.tsv \
+          <(cat $SCRATCH_PATH/Data/sumstats/CHIP_inclusive_EUR_GCST90165267_b38_with_b37.tsv | \
+            cut -f 3,5,6,10,11,12,13,25 | \
+            awk '{print $1 "_" $8,$1,$8,$2,$3,$4,$5,$6,$7}' FS='\t' OFS='\t') > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS1.tsv
+
+cat <(head -1 $SCRATCH_PATH/Data/sumstats/CHIP_inclusive_EUR_GCST90165267_b38_with_b37.tsv | \
+      cut -f 3,5,6,10,11,12,13,25 | \
+      awk '{print $1 "_" $8,$1,$8,$2,$3,$4,$5,$6,$7}' FS='\t' OFS='\t') \
+    <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS1.tsv) | \
+    sort -nk2,2 -nk3,3 | uniq > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS2.tsv
+
+grep -Fwf $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_CHR_BP_Final2.tsv \
+          <(cat $SCRATCH_PATH/Data/sumstats/DNMT3A_CHIP_EUR_GCST90165271_b38_with_b37.tsv | \
+            cut -f 3,5,6,10,11,12,13,25 | \
+            awk '{print $1 "_" $8,$1,$8,$2,$3,$4,$5,$6,$7}' FS='\t' OFS='\t') > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS1.tsv
+
+cat <(head -1 $SCRATCH_PATH/Data/sumstats/DNMT3A_CHIP_EUR_GCST90165271_b38_with_b37.tsv | \
+      cut -f 3,5,6,10,11,12,13,25 | \
+      awk '{print $1 "_" $8,$1,$8,$2,$3,$4,$5,$6,$7}' FS='\t' OFS='\t') \
+    <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS1.tsv) | \
+    sort -nk2,2 -nk3,3 | uniq > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS2.tsv
+
+grep -Fwf $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_CHR_BP_Final2.tsv \
+          <(cat $SCRATCH_PATH/Data/sumstats/TET2_CHIP_EUR_GCST90165281_b38_with_b37.tsv | \
+            cut -f 3,5,6,10,11,12,13,25 | \
+            awk '{print $1 "_" $8,$1,$8,$2,$3,$4,$5,$6,$7}' FS='\t' OFS='\t') > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS1.tsv
+
+cat <(head -1 $SCRATCH_PATH/Data/sumstats/TET2_CHIP_EUR_GCST90165281_b38_with_b37.tsv | \
+      cut -f 3,5,6,10,11,12,13,25 | \
+      awk '{print $1 "_" $8,$1,$8,$2,$3,$4,$5,$6,$7}' FS='\t' OFS='\t') \
+    <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS1.tsv) | \
+    sort -nk2,2 -nk3,3 | uniq > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS2.tsv
+```
+
+Now filtering remaining SNPs to only include those that pass either P < 1e-6 or P < 5e-8 in their respective CHIP GWAS.
+
+```{bash, eval = F}
+# Filtering out SNPs with P > 1e-6 or P > 5e-8 from each CHIP GWAS.
+cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS2.tsv | awk '$9 < 5E-8' > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8.tsv
+cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS2.tsv | awk '$9 < 1E-6' > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6.tsv
+
+cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS2.tsv | awk '$9 < 5E-8' > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8.tsv
+cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS2.tsv | awk '$9 < 1E-6' > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6.tsv
+
+cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS2.tsv | awk '$9 < 5E-8' > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8.tsv
+cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS2.tsv | awk '$9 < 1E-6' > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6.tsv
+
+cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS2.tsv | awk '$9 < 5E-8' > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8.tsv
+cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS2.tsv | awk '$9 < 1E-6' > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6.tsv
+```
+
+Performing PLINK pruning and clumping for all remaining SNPs for each GWAS using LD from the UK Biobank.
+
+```{bash, eval = F}
+# Performing PLINK pruning for each GWAS in the UK Biobank.
+# Combining all chromosome/BP locations into a single file with CHR:BP-BP format in each row (adding leading 0 to all CHR under 10).
+cat <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6.tsv | cut -f 2,3 | awk '$1 < 10' FS='\t' OFS='\t' | awk '{print "0" $1 ":" $2 "-" $2}') \
+    <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6.tsv | cut -f 2,3 | awk '$1 > 9' FS='\t' OFS='\t' | awk '{print $1 ":" $2 "-" $2}') \
+    <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6.tsv | cut -f 2,3 | awk '$1 < 10' FS='\t' OFS='\t' | awk '{print "0" $1 ":" $2 "-" $2}') \
+    <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6.tsv | cut -f 2,3 | awk '$1 > 9' FS='\t' OFS='\t' | awk '{print $1 ":" $2 "-" $2}') \
+    <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6.tsv | cut -f 2,3 | awk '$1 < 10' FS='\t' OFS='\t' | awk '{print "0" $1 ":" $2 "-" $2}') \
+    <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6.tsv | cut -f 2,3 | awk '$1 > 9' FS='\t' OFS='\t' | awk '{print $1 ":" $2 "-" $2}') \
+    <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6.tsv | cut -f 2,3 | awk '$1 < 10' FS='\t' OFS='\t' | awk '{print "0" $1 ":" $2 "-" $2}') \
+    <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6.tsv | cut -f 2,3 | awk '$1 > 9' FS='\t' OFS='\t' | awk '{print $1 ":" $2 "-" $2}') | sort -u  > $SCRATCH_PATH/Output/Temp/all_bgen.tsv
+
+# Making file of all chromosomes with SNPs present.
+cat $SCRATCH_PATH/Output/Temp/*1e6* | cut -f 2 | sort -nu > $SCRATCH_PATH/Output/Temp/all_chr.tsv
+
+# Setting UK Biobank directory variable.
+UKBB_DIR=/Volumes/archive/merrimanlab_nobackup/ukbio/EGAD00010001474
+
+# Loading bgenix module.
+module load bgenix
+
+# Extracting SNPs of interest from UK Biobank bgen files in VCF format.
+parallel "bgenix -g {1}/ukb_imp_chr{3}_v3.bgen -vcf -incl-range {2}/Output/Temp/all_bgen.tsv | bcftools reheader -h {1}/bgen_to_vcf/new_header.txt | bcftools annotate --rename-chrs {1}/bgen_to_vcf/rename_contigs.txt | bgzip -c > {2}/Output/Temp/chr{3}.vcf.gz" ::: $UKBB_DIR ::: $SCRATCH_PATH :::: $SCRATCH_PATH/Output/Temp/all_chr.tsv
+
+# Loading plink module.
+module load plink/plink1.9b6.10
+
+# Converting VCF files to plink format.
+parallel "plink --vcf {1}/Output/Temp/chr{2}.vcf.gz --make-bed --out {1}/Output/Temp/chr{2}_plink" ::: $SCRATCH_PATH :::: $SCRATCH_PATH/Output/Temp/all_chr.tsv
+
+# Making file with list of absolute paths for output files.
+ls -d $SCRATCH_PATH/Output/Temp/chr*_plink.bed | sed 's/.bed//g' > $SCRATCH_PATH/Output/Temp/mergefile.txt
+
+# Merging all PLINK files together.
+plink --merge-list $SCRATCH_PATH/Output/Temp/mergefile.txt --make-bed --out $SCRATCH_PATH/Output/Temp/merged
+
+# Making plink filters for each GWAS.
+cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8.tsv | awk '{print $2,$3,$3,$1}' > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_plink_filter.tsv
+cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6.tsv | awk '{print $2,$3,$3,$1}' > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_plink_filter.tsv
+cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8.tsv | awk '{print $2,$3,$3,$1}' > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_plink_filter.tsv
+cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6.tsv | awk '{print $2,$3,$3,$1}' > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_plink_filter.tsv
+cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8.tsv | awk '{print $2,$3,$3,$1}' > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_plink_filter.tsv
+cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6.tsv | awk '{print $2,$3,$3,$1}' > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_plink_filter.tsv
+cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8.tsv | awk '{print $2,$3,$3,$1}' > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_plink_filter.tsv
+cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6.tsv | awk '{print $2,$3,$3,$1}' > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_plink_filter.tsv
+
+# Extracting SNPs from each CHIP GWAS.
+plink --bfile $SCRATCH_PATH/Output/Temp/merged --extract range $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_plink_filter.tsv --make-bed --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_plink
+plink --bfile $SCRATCH_PATH/Output/Temp/merged --extract range $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_plink_filter.tsv --make-bed --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_plink
+plink --bfile $SCRATCH_PATH/Output/Temp/merged --extract range $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_plink_filter.tsv --make-bed --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_plink
+plink --bfile $SCRATCH_PATH/Output/Temp/merged --extract range $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_plink_filter.tsv --make-bed --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_plink
+plink --bfile $SCRATCH_PATH/Output/Temp/merged --extract range $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_plink_filter.tsv --make-bed --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_plink
+plink --bfile $SCRATCH_PATH/Output/Temp/merged --extract range $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_plink_filter.tsv --make-bed --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_plink
+plink --bfile $SCRATCH_PATH/Output/Temp/merged --extract range $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_plink_filter.tsv --make-bed --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_plink
+plink --bfile $SCRATCH_PATH/Output/Temp/merged --extract range $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_plink_filter.tsv --make-bed --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_plink
+
+# Pruning at 0.2 R-squared threshold.
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_plink --indep-pairwise 50 5 0.2 --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.2
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_plink --indep-pairwise 50 5 0.2 --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.2
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_plink --indep-pairwise 50 5 0.2 --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.2
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_plink --indep-pairwise 50 5 0.2 --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.2
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_plink --indep-pairwise 50 5 0.2 --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.2
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_plink --indep-pairwise 50 5 0.2 --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.2
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_plink --indep-pairwise 50 5 0.2 --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.2
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_plink --indep-pairwise 50 5 0.2 --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.2
+
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.2.prune.in --recode --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.2_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.2.prune.in --recode --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.2_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.2.prune.in --recode --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.2_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.2.prune.in --recode --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.2_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.2.prune.in --recode --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.2_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.2.prune.in --recode --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.2_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.2.prune.in --recode --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.2_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.2.prune.in --recode --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.2_prune
+
+# Pruning at 0.1 R-squared threshold.
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_plink --indep-pairwise 50 5 0.1 --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.1
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_plink --indep-pairwise 50 5 0.1 --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.1
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_plink --indep-pairwise 50 5 0.1 --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.1
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_plink --indep-pairwise 50 5 0.1 --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.1
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_plink --indep-pairwise 50 5 0.1 --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.1
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_plink --indep-pairwise 50 5 0.1 --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.1
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_plink --indep-pairwise 50 5 0.1 --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.1
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_plink --indep-pairwise 50 5 0.1 --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.1
+
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.1.prune.in --recode --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.1_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.1.prune.in --recode --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.1_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.1.prune.in --recode --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.1_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.1.prune.in --recode --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.1_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.1.prune.in --recode --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.1_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.1.prune.in --recode --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.1_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.1.prune.in --recode --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.1_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.1.prune.in --recode --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.1_prune
+
+# Pruning at 0.01 R-squared threshold.
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_plink --indep-pairwise 50 5 0.01 --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.01
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_plink --indep-pairwise 50 5 0.01 --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.01
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_plink --indep-pairwise 50 5 0.01 --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.01
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_plink --indep-pairwise 50 5 0.01 --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.01
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_plink --indep-pairwise 50 5 0.01 --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.01
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_plink --indep-pairwise 50 5 0.01 --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.01
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_plink --indep-pairwise 50 5 0.01 --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.01
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_plink --indep-pairwise 50 5 0.01 --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.01
+
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.01.prune.in --recode --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.01_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.01.prune.in --recode --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.01_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.01.prune.in --recode --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.01_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.01.prune.in --recode --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.01_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.01.prune.in --recode --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.01_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.01.prune.in --recode --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.01_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.01.prune.in --recode --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.01_prune
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.01.prune.in --recode --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.01_prune
+
+# Preparing data for clumping.
+cat <(echo $'CHR_BP\tP\tSNP') \
+    <(join -1 1 -2 1 -t $'\t' <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8.tsv | cut -f 1,9 | sort) \
+                              <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_plink.bim | cut -f 1,2,4 | awk '{print $1 "_" $3,$2}' FS='\t' OFS='\t' | sort)) > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_ToClump.txt
+cat <(echo $'CHR_BP\tP\tSNP') \
+    <(join -1 1 -2 1 -t $'\t' <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6.tsv | cut -f 1,9 | sort) \
+                              <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_plink.bim | cut -f 1,2,4 | awk '{print $1 "_" $3,$2}' FS='\t' OFS='\t' | sort)) > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_ToClump.txt
+cat <(echo $'CHR_BP\tP\tSNP') \
+    <(join -1 1 -2 1 -t $'\t' <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8.tsv | cut -f 1,9 | sort) \
+                              <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_plink.bim | cut -f 1,2,4 | awk '{print $1 "_" $3,$2}' FS='\t' OFS='\t' | sort)) > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_ToClump.txt
+cat <(echo $'CHR_BP\tP\tSNP') \
+    <(join -1 1 -2 1 -t $'\t' <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6.tsv | cut -f 1,9 | sort) \
+                              <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_plink.bim | cut -f 1,2,4 | awk '{print $1 "_" $3,$2}' FS='\t' OFS='\t' | sort)) > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_ToClump.txt
+cat <(echo $'CHR_BP\tP\tSNP') \
+    <(join -1 1 -2 1 -t $'\t' <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8.tsv | cut -f 1,9 | sort) \
+                              <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_plink.bim | cut -f 1,2,4 | awk '{print $1 "_" $3,$2}' FS='\t' OFS='\t' | sort)) > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_ToClump.txt
+cat <(echo $'CHR_BP\tP\tSNP') \
+    <(join -1 1 -2 1 -t $'\t' <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6.tsv | cut -f 1,9 | sort) \
+                              <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_plink.bim | cut -f 1,2,4 | awk '{print $1 "_" $3,$2}' FS='\t' OFS='\t' | sort)) > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_ToClump.txt
+cat <(echo $'CHR_BP\tP\tSNP') \
+    <(join -1 1 -2 1 -t $'\t' <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8.tsv | cut -f 1,9 | sort) \
+                              <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_plink.bim | cut -f 1,2,4 | awk '{print $1 "_" $3,$2}' FS='\t' OFS='\t' | sort)) > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_ToClump.txt
+cat <(echo $'CHR_BP\tP\tSNP') \
+    <(join -1 1 -2 1 -t $'\t' <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6.tsv | cut -f 1,9 | sort) \
+                              <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_plink.bim | cut -f 1,2,4 | awk '{print $1 "_" $3,$2}' FS='\t' OFS='\t' | sort)) > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_ToClump.txt
+
+# Clumping at 0.2 R-squared threshold.
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_plink --clump $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_ToClump.txt --clump-kb 2500 --clump-r2 0.2 --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.2
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_plink --clump $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_ToClump.txt --clump-kb 2500 --clump-r2 0.2 --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.2
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_plink --clump $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_ToClump.txt --clump-kb 2500 --clump-r2 0.2 --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.2
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_plink --clump $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_ToClump.txt --clump-kb 2500 --clump-r2 0.2 --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.2
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_plink --clump $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_ToClump.txt --clump-kb 2500 --clump-r2 0.2 --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.2
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_plink --clump $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_ToClump.txt --clump-kb 2500 --clump-r2 0.2 --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.2
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_plink --clump $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_ToClump.txt --clump-kb 2500 --clump-r2 0.2 --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.2
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_plink --clump $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_ToClump.txt --clump-kb 2500 --clump-r2 0.2 --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.2
+
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.2.clumped --recode --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.2_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.2.clumped --recode --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.2_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.2.clumped --recode --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.2_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.2.clumped --recode --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.2_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.2.clumped --recode --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.2_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.2.clumped --recode --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.2_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.2.clumped --recode --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.2_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.2.clumped --recode --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.2_clump
+
+plink --file $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.2_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.2_clump
+plink --file $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.2_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.2_clump
+plink --file $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.2_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.2_clump
+plink --file $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.2_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.2_clump
+plink --file $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.2_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.2_clump
+plink --file $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.2_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.2_clump
+plink --file $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.2_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.2_clump
+plink --file $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.2_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.2_clump
+
+cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.2_clump.ld | awk '$7 > 0.2'
+cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.2_clump.ld | awk '$7 > 0.2'
+cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.2_clump.ld | awk '$7 > 0.2'
+cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.2_clump.ld | awk '$7 > 0.2'
+cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.2_clump.ld | awk '$7 > 0.2'
+cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.2_clump.ld | awk '$7 > 0.2'
+cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.2_clump.ld | awk '$7 > 0.2'
+cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.2_clump.ld | awk '$7 > 0.2'
+
+# Clumping at 0.1 R-squared threshold.
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_plink --clump $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_ToClump.txt --clump-kb 2500 --clump-r2 0.1 --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.1
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_plink --clump $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_ToClump.txt --clump-kb 2500 --clump-r2 0.1 --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.1
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_plink --clump $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_ToClump.txt --clump-kb 2500 --clump-r2 0.1 --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.1
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_plink --clump $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_ToClump.txt --clump-kb 2500 --clump-r2 0.1 --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.1
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_plink --clump $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_ToClump.txt --clump-kb 2500 --clump-r2 0.1 --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.1
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_plink --clump $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_ToClump.txt --clump-kb 2500 --clump-r2 0.1 --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.1
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_plink --clump $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_ToClump.txt --clump-kb 2500 --clump-r2 0.1 --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.1
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_plink --clump $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_ToClump.txt --clump-kb 2500 --clump-r2 0.1 --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.1
+
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.1.clumped --recode --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.1_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.1.clumped --recode --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.1_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.1.clumped --recode --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.1_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.1.clumped --recode --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.1_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.1.clumped --recode --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.1_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.1.clumped --recode --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.1_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.1.clumped --recode --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.1_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.1.clumped --recode --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.1_clump
+
+plink --file $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.1_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.1_clump
+plink --file $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.1_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.1_clump
+plink --file $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.1_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.1_clump
+plink --file $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.1_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.1_clump
+plink --file $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.1_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.1_clump
+plink --file $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.1_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.1_clump
+plink --file $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.1_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.1_clump
+plink --file $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.1_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.1_clump
+
+cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.1_clump.ld | awk '$7 > 0.1'
+cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.1_clump.ld | awk '$7 > 0.1'
+cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.1_clump.ld | awk '$7 > 0.1'
+cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.1_clump.ld | awk '$7 > 0.1'
+cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.1_clump.ld | awk '$7 > 0.1'
+cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.1_clump.ld | awk '$7 > 0.1'
+cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.1_clump.ld | awk '$7 > 0.1'
+cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.1_clump.ld | awk '$7 > 0.1'
+
+# Clumping at 0.01 R-squared threshold.
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_plink --clump $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_ToClump.txt --clump-kb 2500 --clump-r2 0.01 --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.01
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_plink --clump $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_ToClump.txt --clump-kb 2500 --clump-r2 0.01 --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.01
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_plink --clump $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_ToClump.txt --clump-kb 2500 --clump-r2 0.01 --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.01
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_plink --clump $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_ToClump.txt --clump-kb 2500 --clump-r2 0.01 --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.01
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_plink --clump $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_ToClump.txt --clump-kb 2500 --clump-r2 0.01 --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.01
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_plink --clump $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_ToClump.txt --clump-kb 2500 --clump-r2 0.01 --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.01
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_plink --clump $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_ToClump.txt --clump-kb 2500 --clump-r2 0.01 --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.01
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_plink --clump $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_ToClump.txt --clump-kb 2500 --clump-r2 0.01 --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.01
+
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.01.clumped --recode --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.01_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.01.clumped --recode --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.01_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.01.clumped --recode --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.01_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.01.clumped --recode --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.01_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.01.clumped --recode --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.01_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.01.clumped --recode --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.01_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_plink --extract $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.01.clumped --recode --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.01_clump
+plink --bfile $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_plink --extract $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.01.clumped --recode --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.01_clump
+
+plink --file $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.01_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.01_clump
+plink --file $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.01_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.01_clump
+plink --file $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.01_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.01_clump
+plink --file $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.01_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.01_clump
+plink --file $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.01_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.01_clump
+plink --file $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.01_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.01_clump
+plink --file $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.01_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.01_clump
+plink --file $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.01_clump --r2 inter-chr --ld-window-r2 0 --out $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.01_clump
+
+cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.01_clump.ld | awk '$7 > 0.01'
+cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.01_clump.ld | awk '$7 > 0.01'
+cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.01_clump.ld | awk '$7 > 0.01'
+cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.01_clump.ld | awk '$7 > 0.01'
+cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.01_clump.ld | awk '$7 > 0.01'
+cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.01_clump.ld | awk '$7 > 0.01'
+cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.01_clump.ld | awk '$7 > 0.01'
+cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.01_clump.ld | awk '$7 > 0.01'
+
+# Filtering summary statistics files to only keep pruned lead SNPs at each threshold.
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.2_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.2_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.2_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.2_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.2_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.2_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.2_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.2_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.2_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.2_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.2_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.2_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.2_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.2_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.2_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.2_prune.tsv
+
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.2_prune.tsv > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.2_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.2_prune.tsv > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.2_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.2_prune.tsv > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.2_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.2_prune.tsv > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.2_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.2_prune.tsv > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.2_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.2_prune.tsv > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.2_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.2_prune.tsv > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.2_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.2_prune.tsv > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.2_Prune_Final.tsv
+
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.1_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.1_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.1_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.1_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.1_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.1_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.1_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.1_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.1_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.1_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.1_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.1_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.1_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.1_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.1_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.1_prune.tsv
+
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.1_prune.tsv > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.1_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.1_prune.tsv > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.1_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.1_prune.tsv > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.1_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.1_prune.tsv > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.1_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.1_prune.tsv > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.1_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.1_prune.tsv > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.1_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.1_prune.tsv > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.1_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.1_prune.tsv > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.1_Prune_Final.tsv
+
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.01_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.01_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.01_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.01_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.01_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.01_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.01_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.01_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.01_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.01_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.01_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.01_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.01_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.01_prune.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.01_prune.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.01_prune.tsv
+
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.01_prune.tsv > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.01_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.01_prune.tsv > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.01_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.01_prune.tsv > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.01_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.01_prune.tsv > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.01_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.01_prune.tsv > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.01_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.01_prune.tsv > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.01_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.01_prune.tsv > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.01_Prune_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.01_prune.tsv > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.01_Prune_Final.tsv
+
+# Filtering summary statistics files to only keep clumped lead SNPs at each threshold.
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.2_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.2_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.2_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.2_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.2_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.2_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.2_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.2_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.2_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.2_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.2_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.2_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.2_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.2_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.2_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.2_clump.tsv
+
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.2_clump.tsv > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.2_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.2_clump.tsv > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.2_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.2_clump.tsv > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.2_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.2_clump.tsv > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.2_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.2_clump.tsv > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.2_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.2_clump.tsv > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.2_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.2_clump.tsv > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.2_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.2_clump.tsv > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.2_Clump_Final.tsv
+
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.1_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.1_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.1_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.1_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.1_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.1_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.1_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.1_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.1_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.1_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.1_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.1_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.1_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.1_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.1_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.1_clump.tsv
+
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.1_clump.tsv > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.1_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.1_clump.tsv > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.1_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.1_clump.tsv > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.1_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.1_clump.tsv > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.1_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.1_clump.tsv > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.1_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.1_clump.tsv > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.1_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.1_clump.tsv > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.1_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.1_clump.tsv > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.1_Clump_Final.tsv
+
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.01_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.01_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.01_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.01_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.01_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.01_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.01_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.01_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.01_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.01_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.01_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.01_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.01_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8.tsv) > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.01_clump.tsv
+grep -Fwf <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.01_clump.map | awk '{print $1 "_" $4}') \
+          <(cat $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6.tsv) > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.01_clump.tsv
+
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.01_clump.tsv > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_5e8_0.01_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.01_clump.tsv > $SCRATCH_PATH/Output/Temp/CHIP_exclusive_GWAS_1e6_0.01_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.01_clump.tsv > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_5e8_0.01_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.01_clump.tsv > $SCRATCH_PATH/Output/Temp/CHIP_inclusive_GWAS_1e6_0.01_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.01_clump.tsv > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_5e8_0.01_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.01_clump.tsv > $SCRATCH_PATH/Output/Temp/DNMT3A_CHIP_GWAS_1e6_0.01_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.01_clump.tsv > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_5e8_0.01_Clump_Final.tsv
+cat <(head -1 $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS2.tsv) $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.01_clump.tsv > $SCRATCH_PATH/Output/Temp/TET2_CHIP_GWAS_1e6_0.01_Clump_Final.tsv
+```
+
+Now extracting the gout summary stats for these same SNPs.
+
+```{bash, eval = F}
+cat $SCRATCH_PATH/Output/Temp/*_Prune_Final.tsv $SCRATCH_PATH/Output/Temp/*_Clump_Final.tsv | cut -f 1 | tail -n+2 | sort -u > $SCRATCH_PATH/Output/Temp/SNP_coords.tsv
+
+grep -Fwf $SCRATCH_PATH/Output/Temp/SNP_coords.tsv /Volumes/archive/merrimanlab/major_gwas_paper_archive/results_meta_analysis/EUR/full/EUR_meta_full1_clean_rsid.nfiltered.biallelic.txt > $SCRATCH_PATH/Output/Temp/All_Gout_Effects.txt
+
+# Combining together into a zip file to be downloaded to my lab computer.
+zip -j $SCRATCH_PATH/Output/Temp/out.zip $SCRATCH_PATH/Output/Temp/All_Gout_Effects.txt $SCRATCH_PATH/Output/Temp/*_Prune_Final.tsv $SCRATCH_PATH/Output/Temp/*_Clump_Final.tsv
+```
+
+### Running MR (MendelianRandomization) - P < 5e8 - R2 0.01 - Clumped
+
+```{r, message = F, warning = F}
+# Reading in results of full CHIP GWAS and preparing for MR.
+chip_betas <- read_delim(file = path(path1, "Data/Kessler/CHIP_inclusive_GWAS_5e8_0.01_Clump_Final.tsv")) %>%
+  rename(SNP = chromosome_b37_coord,
+         EA_CHIP  = effect_allele,
+         OA_CHIP = other_allele) |>
+  mutate(b_CHIP = log(odds_ratio),
+         se_CHIP = (ci_upper - ci_lower) / 3.92) %>%
+  select(SNP, EA_CHIP, OA_CHIP, b_CHIP, se_CHIP)
+
+chip_betas <- chip_betas %>%
+  filter(b_CHIP < 0) %>%
+  mutate(EA_tmp = EA_CHIP,
+         EA_CHIP = OA_CHIP,
+         OA_CHIP = EA_tmp,
+         b_CHIP = -1 * b_CHIP) %>%
+  select(-EA_tmp) %>%
+  rbind(chip_betas %>% filter(b_CHIP > 0))
+
+# Reading in results of Gout GWAS and preparing for MR.
+gout_betas <- read_delim(file = path(path1, "Data/All_Gout_Effects.txt"), col_names = F) %>%
+  select(X19, X4:X5, X10:X11) %>%
+  rename(SNP = X19,
+         EA_gout = X4,
+         OA_gout = X5,
+         b_gout = X10,
+         se_gout = X11)
+
+# Combining together into one dataframe.
+all_betas <- chip_betas %>%
+  left_join(gout_betas, by = "SNP")
+
+# For those with mismatched allele orders between GWAS, flipping effects.
+same <- all_betas %>%
+  filter(EA_CHIP == EA_gout)
+
+diff <- all_betas %>%
+  filter(EA_CHIP != EA_gout) %>%
+  mutate(b_gout = -1 * b_gout,
+         temp = EA_gout,
+         EA_gout = OA_gout,
+         OA_gout = temp) %>%
+  select(-temp)
+
+all_betas2 <- rbind(same, diff) %>%
+  mutate(LCL_CHIP = b_CHIP - 1.96 * se_CHIP,
+         UCL_CHIP = b_CHIP + 1.96 * se_CHIP,
+         LCL_gout = b_gout - 1.96 * se_gout,
+         UCL_gout = b_gout + 1.96 * se_gout) |>
+  filter(EA_CHIP == EA_gout,
+         OA_CHIP == OA_gout)
+
+# Making input object for MR analysis.
+CHIPinput <- mr_input(bx = all_betas2$b_CHIP,
+                    bxse = all_betas2$se_CHIP,
+                    by = all_betas2$b_gout,
+                    byse = all_betas2$se_gout,
+                    exposure = "All CHIP (inclusive)",
+                    outcome = "Gout",
+                    snps = all_betas2$SNP)
+
+# Running all MR methods of this input object.
+CHIPoutput_all <- mr_allmethods(CHIPinput, method = "all")
+
+# Saving objects for making final figure.
+all_betas2_1 <- all_betas2
+CHIPoutput_all_1 <- CHIPoutput_all
+
+input_file <- all_betas2 |>
+  rename(beta.exposure = b_CHIP,
+         beta.outcome = b_gout,
+         se.exposure = se_CHIP,
+         se.outcome = se_gout) |>
+  select(beta.exposure, beta.outcome, se.exposure, se.outcome)
+
+mr.raps(input_file, over.dispersion = FALSE)
+
+mr_presso(BetaOutcome = "beta.outcome",
+          BetaExposure = "beta.exposure",
+          SdOutcome = "se.outcome",
+          SdExposure = "se.exposure",
+          OUTLIERtest = TRUE,
+          DISTORTIONtest = TRUE,
+          data = as.data.frame(input_file),
+          NbDistribution = 1000,
+          SignifThreshold = 0.05)
+```
+
+```{r, message = F, warning = F}
+# Reading in results of full CHIP GWAS and preparing for MR.
+chip_betas <- read_delim(file = path(path1, "Data/Kessler/CHIP_exclusive_GWAS_5e8_0.01_Clump_Final.tsv")) %>%
+  rename(SNP = chromosome_b37_coord,
+         EA_CHIP  = effect_allele,
+         OA_CHIP = other_allele) |>
+  mutate(b_CHIP = log(odds_ratio),
+         se_CHIP = (ci_upper - ci_lower) / 3.92) %>%
+  select(SNP, EA_CHIP, OA_CHIP, b_CHIP, se_CHIP)
+
+chip_betas <- chip_betas %>%
+  filter(b_CHIP < 0) %>%
+  mutate(EA_tmp = EA_CHIP,
+         EA_CHIP = OA_CHIP,
+         OA_CHIP = EA_tmp,
+         b_CHIP = -1 * b_CHIP) %>%
+  select(-EA_tmp) %>%
+  rbind(chip_betas %>% filter(b_CHIP > 0))
+
+# Combining together into one dataframe.
+all_betas <- chip_betas %>%
+  left_join(gout_betas, by = "SNP")
+
+# For those with mismatched allele orders between GWAS, flipping effects.
+same <- all_betas %>%
+  filter(EA_CHIP == EA_gout)
+
+diff <- all_betas %>%
+  filter(EA_CHIP != EA_gout) %>%
+  mutate(b_gout = -1 * b_gout,
+         temp = EA_gout,
+         EA_gout = OA_gout,
+         OA_gout = temp) %>%
+  select(-temp)
+
+all_betas2 <- rbind(same, diff) %>%
+  mutate(LCL_CHIP = b_CHIP - 1.96 * se_CHIP,
+         UCL_CHIP = b_CHIP + 1.96 * se_CHIP,
+         LCL_gout = b_gout - 1.96 * se_gout,
+         UCL_gout = b_gout + 1.96 * se_gout) |>
+  filter(EA_CHIP == EA_gout,
+         OA_CHIP == OA_gout)
+
+# Making input object for MR analysis.
+CHIPinput <- mr_input(bx = all_betas2$b_CHIP,
+                    bxse = all_betas2$se_CHIP,
+                    by = all_betas2$b_gout,
+                    byse = all_betas2$se_gout,
+                    exposure = "All CHIP (exclusive)",
+                    outcome = "Gout",
+                    snps = all_betas2$SNP)
+
+# Running all MR methods of this input object.
+CHIPoutput_all <- mr_allmethods(CHIPinput, method = "all")
+
+# Saving objects for making final figure.
+all_betas2_2 <- all_betas2
+CHIPoutput_all_2 <- CHIPoutput_all
+
+input_file <- all_betas2 |>
+  rename(beta.exposure = b_CHIP,
+         beta.outcome = b_gout,
+         se.exposure = se_CHIP,
+         se.outcome = se_gout) |>
+  select(beta.exposure, beta.outcome, se.exposure, se.outcome)
+
+mr.raps(input_file, over.dispersion = FALSE)
+```
+
+```{r, message = F, warning = F}
+# Reading in results of TET2 CHIP GWAS and preparing for MR.
+chip_betas <- read_delim(file = path(path1, "Data/Kessler/TET2_CHIP_GWAS_5e8_0.01_Clump_Final.tsv")) %>%
+  rename(SNP = chromosome_b37_coord,
+         EA_CHIP  = effect_allele,
+         OA_CHIP = other_allele) |>
+  mutate(b_CHIP = log(odds_ratio),
+         se_CHIP = (ci_upper - ci_lower) / 3.92) %>%
+  select(SNP, EA_CHIP, OA_CHIP, b_CHIP, se_CHIP)
+
+chip_betas <- chip_betas %>%
+  filter(b_CHIP < 0) %>%
+  mutate(EA_tmp = EA_CHIP,
+         EA_CHIP = OA_CHIP,
+         OA_CHIP = EA_tmp,
+         b_CHIP = -1 * b_CHIP) %>%
+  select(-EA_tmp) %>%
+  rbind(chip_betas %>% filter(b_CHIP > 0))
+
+# Combining together into one dataframe.
+all_betas <- chip_betas %>%
+  left_join(gout_betas, by = "SNP")
+
+# For those with mismatched allele orders between GWAS, flipping effects.
+same <- all_betas %>%
+  filter(EA_CHIP == EA_gout)
+
+diff <- all_betas %>%
+  filter(EA_CHIP != EA_gout) %>%
+  mutate(b_gout = -1 * b_gout,
+         temp = EA_gout,
+         EA_gout = OA_gout,
+         OA_gout = temp) %>%
+  select(-temp)
+
+all_betas2 <- rbind(same, diff) %>%
+  mutate(LCL_CHIP = b_CHIP - 1.96 * se_CHIP,
+         UCL_CHIP = b_CHIP + 1.96 * se_CHIP,
+         LCL_gout = b_gout - 1.96 * se_gout,
+         UCL_gout = b_gout + 1.96 * se_gout) |>
+  filter(EA_CHIP == EA_gout,
+         OA_CHIP == OA_gout)
+
+# Making input object for MR analysis.
+CHIPinput <- mr_input(bx = all_betas2$b_CHIP,
+                    bxse = all_betas2$se_CHIP,
+                    by = all_betas2$b_gout,
+                    byse = all_betas2$se_gout,
+                    exposure = "TET2 CHIP",
+                    outcome = "Gout",
+                    snps = all_betas2$SNP)
+
+# Running all MR methods of this input object.
+CHIPoutput_all <- mr_allmethods(CHIPinput, method = "all")
+
+# Saving objects for making final figure.
+all_betas2_3 <- all_betas2
+CHIPoutput_all_3 <- CHIPoutput_all
+
+input_file <- all_betas2 |>
+  rename(beta.exposure = b_CHIP,
+         beta.outcome = b_gout,
+         se.exposure = se_CHIP,
+         se.outcome = se_gout) |>
+  select(beta.exposure, beta.outcome, se.exposure, se.outcome)
+
+mr.raps(input_file, over.dispersion = FALSE)
+```
+
+```{r, message = F, warning = F}
+# Reading in results of DNMT3A CHIP GWAS and preparing for MR.
+chip_betas <- read_delim(file = path(path1, "Data/Kessler/DNMT3A_CHIP_GWAS_5e8_0.01_Clump_Final.tsv")) %>%
+  rename(SNP = chromosome_b37_coord,
+         EA_CHIP  = effect_allele,
+         OA_CHIP = other_allele) |>
+  mutate(b_CHIP = log(odds_ratio),
+         se_CHIP = (ci_upper - ci_lower) / 3.92) %>%
+  select(SNP, EA_CHIP, OA_CHIP, b_CHIP, se_CHIP)
+
+chip_betas <- chip_betas %>%
+  filter(b_CHIP < 0) %>%
+  mutate(EA_tmp = EA_CHIP,
+         EA_CHIP = OA_CHIP,
+         OA_CHIP = EA_tmp,
+         b_CHIP = -1 * b_CHIP) %>%
+  select(-EA_tmp) %>%
+  rbind(chip_betas %>% filter(b_CHIP > 0))
+
+# Combining together into one dataframe.
+all_betas <- chip_betas %>%
+  left_join(gout_betas, by = "SNP")
+
+# For those with mismatched allele orders between GWAS, flipping effects.
+same <- all_betas %>%
+  filter(EA_CHIP == EA_gout)
+
+diff <- all_betas %>%
+  filter(EA_CHIP != EA_gout) %>%
+  mutate(b_gout = -1 * b_gout,
+         temp = EA_gout,
+         EA_gout = OA_gout,
+         OA_gout = temp) %>%
+  select(-temp)
+
+all_betas2 <- rbind(same, diff) %>%
+  mutate(LCL_CHIP = b_CHIP - 1.96 * se_CHIP,
+         UCL_CHIP = b_CHIP + 1.96 * se_CHIP,
+         LCL_gout = b_gout - 1.96 * se_gout,
+         UCL_gout = b_gout + 1.96 * se_gout) |>
+  filter(EA_CHIP == EA_gout,
+         OA_CHIP == OA_gout)
+
+# Making input object for MR analysis.
+CHIPinput <- mr_input(bx = all_betas2$b_CHIP,
+                    bxse = all_betas2$se_CHIP,
+                    by = all_betas2$b_gout,
+                    byse = all_betas2$se_gout,
+                    exposure = "DNMT3A CHIP",
+                    outcome = "Gout",
+                    snps = all_betas2$SNP)
+
+# Running all MR methods of this input object.
+CHIPoutput_all <- mr_allmethods(CHIPinput, method = "all")
+
+# Saving objects for making final figure.
+all_betas2_4 <- all_betas2
+CHIPoutput_all_4 <- CHIPoutput_all
+
+input_file <- all_betas2 |>
+  rename(beta.exposure = b_CHIP,
+         beta.outcome = b_gout,
+         se.exposure = se_CHIP,
+         se.outcome = se_gout) |>
+  select(beta.exposure, beta.outcome, se.exposure, se.outcome)
+
+mr.raps(input_file, over.dispersion = FALSE)
+```
+
+```{r, message = F, warning = F}
+# We want to have a single plot with the scatterplot figures on the left (1 column, 3 rows), and the forest plot on the right (for all 12 total parameters).
+# First making plot for inclusive CHIP GWAS.
+plot1 <- all_betas2_1 %>%
+  ggplot(aes(x = b_CHIP, y = b_gout)) +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) +
+  geom_linerange(aes(xmin = LCL_CHIP, xmax = UCL_CHIP), alpha = 0.25) +
+  geom_linerange(aes(ymin = LCL_gout, ymax = UCL_gout), alpha = 0.25) +
+  geom_line(data = tibble(int = 0, a = c(-1, 1), b = a*CHIPoutput_all_1@Values$Estimate[2] + int), aes(x = a, y = b, color = "median"), linewidth = 0.8) +
+  geom_line(data = tibble(int = 0, a = c(-1, 1), b = a*CHIPoutput_all_1@Values$Estimate[4] + int), aes(x = a, y = b, color = "IVW"), linewidth = 0.8) +
+  geom_point(alpha = 0.25) +
+  scale_color_manual(name = "Method", values = c("median" = gwas_palette[1], "IVW" = gwas_palette[4]), labels = c("Weighted median", "IVW")) +
+  theme_light() +
+  labs(x = "Effect on all CHIP (inclusive) (log OR)",
+       y = "Effect on gout (log OR)") +
+  coord_cartesian(xlim = c(-0.05, 0.7),
+                  ylim = c(-0.1, 0.1),
+                  expand = FALSE)
+
+# First making plot for exclusive CHIP GWAS.
+plot2 <- all_betas2_2 %>%
+  ggplot(aes(x = b_CHIP, y = b_gout)) +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) +
+  geom_linerange(aes(xmin = LCL_CHIP, xmax = UCL_CHIP), alpha = 0.25) +
+  geom_linerange(aes(ymin = LCL_gout, ymax = UCL_gout), alpha = 0.25) +
+  geom_line(data = tibble(int = 0, a = c(-1, 1), b = a*CHIPoutput_all_1@Values$Estimate[2] + int), aes(x = a, y = b, color = "median"), linewidth = 0.8) +
+  geom_line(data = tibble(int = 0, a = c(-1, 1), b = a*CHIPoutput_all_1@Values$Estimate[4] + int), aes(x = a, y = b, color = "IVW"), linewidth = 0.8) +
+  geom_point(alpha = 0.25) +
+  scale_color_manual(name = "Method", values = c("median" = gwas_palette[1], "IVW" = gwas_palette[4]), labels = c("Weighted median", "IVW")) +
+  theme_light() +
+  labs(x = "Effect on all CHIP (exclusive) (log OR)",
+       y = "Effect on gout (log OR)") +
+  coord_cartesian(xlim = c(-0.05, 0.7),
+                  ylim = c(-0.1, 0.1),
+                  expand = FALSE)
+
+# Second making plot for TET2 CHIP GWAS.
+plot3 <- all_betas2_3 %>%
+  ggplot(aes(x = b_CHIP, y = b_gout)) +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) +
+  geom_linerange(aes(xmin = LCL_CHIP, xmax = UCL_CHIP), alpha = 0.25) +
+  geom_linerange(aes(ymin = LCL_gout, ymax = UCL_gout), alpha = 0.25) +
+  geom_line(data = tibble(int = 0, a = c(-1, 1), b = a*CHIPoutput_all_3@Values$Estimate[2] + int), aes(x = a, y = b, color = "median"), linewidth = 0.8) +
+  geom_line(data = tibble(int = 0, a = c(-1, 1), b = a*CHIPoutput_all_3@Values$Estimate[4] + int), aes(x = a, y = b, color = "IVW"), linewidth = 0.8) +
+  geom_point(alpha = 0.25) +
+  scale_color_manual(name = "Method", values = c("median" = gwas_palette[1], "IVW" = gwas_palette[4]), labels = c("Weighted median", "IVW")) +
+  theme_light() +
+  labs(x = "Effect on TET2 CHIP (log OR)",
+       y = "Effect on gout (log OR)") +
+  coord_cartesian(xlim = c(-0.05, 0.7),
+                  ylim = c(-0.1, 0.1),
+                  expand = FALSE)
+
+# Last making plot for DNMT3A CHIP GWAS.
+plot4 <- all_betas2_4 %>%
+  ggplot(aes(x = b_CHIP, y = b_gout)) +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) +
+  geom_point(alpha = 0.25) +
+  geom_linerange(aes(xmin = LCL_CHIP, xmax = UCL_CHIP), alpha = 0.25) +
+  geom_linerange(aes(ymin = LCL_gout, ymax = UCL_gout), alpha = 0.25) +
+  geom_line(data = tibble(int = 0, a = c(-1, 1), b = a*CHIPoutput_all_2@Values$Estimate[2] + int), aes(x = a, y = b, color = "median"), linewidth = 0.8) +
+  geom_line(data = tibble(int = 0, a = c(-1, 1), b = a*CHIPoutput_all_2@Values$Estimate[4] + int), aes(x = a, y = b, color = "IVW"), linewidth = 0.8) +
+  geom_point(alpha = 0.25) +
+  scale_color_manual(name = "Method", values = c("median" = gwas_palette[1], "IVW" = gwas_palette[4]), labels = c("Weighted median", "IVW")) +
+  theme_light() +
+  labs(x = "Effect on DNMT3A CHIP (log OR)",
+       y = "Effect on gout (log OR)") +
+  coord_cartesian(xlim = c(-0.05, 0.7),
+                  ylim = c(-0.1, 0.1),
+                  expand = FALSE)
+
+# Making combined forest plot.
+CHIPoutput_all_1@Values$Method <- c(CHIPoutput_all_1@Values$Method[1:8], paste0(CHIPoutput_all_1@Values$Method[8], " intercept"), CHIPoutput_all_1@Values$Method[10], paste0(CHIPoutput_all_1@Values$Method[10], " intercept"), CHIPoutput_all_1@Values$Method[12], paste0(CHIPoutput_all_1@Values$Method[12], " intercept"), CHIPoutput_all_1@Values$Method[14], paste0(CHIPoutput_all_1@Values$Method[14], " intercept"))
+
+CHIPoutput_all_2@Values$Method <- c(CHIPoutput_all_1@Values$Method[1:8], paste0(CHIPoutput_all_1@Values$Method[8], " intercept"), CHIPoutput_all_1@Values$Method[10], paste0(CHIPoutput_all_1@Values$Method[10], " intercept"), CHIPoutput_all_1@Values$Method[12], paste0(CHIPoutput_all_1@Values$Method[12], " intercept"), CHIPoutput_all_1@Values$Method[14], paste0(CHIPoutput_all_1@Values$Method[14], " intercept"))
+
+CHIPoutput_all_3@Values$Method <- c(CHIPoutput_all_1@Values$Method[1:8], paste0(CHIPoutput_all_1@Values$Method[8], " intercept"), CHIPoutput_all_1@Values$Method[10], paste0(CHIPoutput_all_1@Values$Method[10], " intercept"), CHIPoutput_all_1@Values$Method[12], paste0(CHIPoutput_all_1@Values$Method[12], " intercept"), CHIPoutput_all_1@Values$Method[14], paste0(CHIPoutput_all_1@Values$Method[14], " intercept"))
+
+CHIPoutput_all_4@Values$Method <- c(CHIPoutput_all_1@Values$Method[1:8], paste0(CHIPoutput_all_1@Values$Method[8], " intercept"), CHIPoutput_all_1@Values$Method[10], paste0(CHIPoutput_all_1@Values$Method[10], " intercept"), CHIPoutput_all_1@Values$Method[12], paste0(CHIPoutput_all_1@Values$Method[12], " intercept"), CHIPoutput_all_1@Values$Method[14], paste0(CHIPoutput_all_1@Values$Method[14], " intercept"))
+
+method_levels <- c(CHIPoutput_all_1@Values$Method[1:8], CHIPoutput_all_1@Values$Method[10], CHIPoutput_all_1@Values$Method[12], CHIPoutput_all_1@Values$Method[14], CHIPoutput_all_1@Values$Method[9], CHIPoutput_all_1@Values$Method[11], CHIPoutput_all_1@Values$Method[13], CHIPoutput_all_1@Values$Method[15])
+
+plot5 <- CHIPoutput_all_1@Values %>%
+  mutate(Method = factor(Method, levels = rev(method_levels)),
+         label = case_when(str_detect(Method, "median") ~ "median",
+                           str_detect(Method, "IVW") ~ "IVW")) %>%
+  filter(Method %in% (c("Weighted median", "IVW"))) %>%
+  ggplot(aes(x = Estimate, y = Method, color = label)) +
+  geom_point(show.legend = F) +
+  geom_pointrange(aes(xmin = `95% CI `, xmax = ` `), show.legend = F) +
+  scale_color_discrete(type = gwas_palette[c(4, 1)]) +
+  geom_vline(xintercept = 0) +
+  theme_light() +
+  theme(axis.title.y = element_blank()) +
+  scale_x_continuous(breaks = c(0, 0.05, 0.1)) +
+  coord_cartesian(xlim = c(-0.01, 0.1))
+
+plot6 <- CHIPoutput_all_2@Values %>%
+  mutate(Method = factor(Method, levels = rev(method_levels)),
+         label = case_when(str_detect(Method, "median") ~ "median",
+                           str_detect(Method, "IVW") ~ "IVW")) %>%
+  filter(Method %in% (c("Weighted median", "IVW"))) %>%
+  ggplot(aes(x = Estimate, y = Method, color = label)) +
+  geom_point(show.legend = F) +
+  geom_pointrange(aes(xmin = `95% CI `, xmax = ` `), show.legend = F) +
+  scale_color_discrete(type = gwas_palette[c(4, 1)]) +
+  geom_vline(xintercept = 0) +
+  theme_light() +
+  theme(axis.title.y = element_blank()) +
+  scale_x_continuous(breaks = c(0, 0.05, 0.1)) +
+  coord_cartesian(xlim = c(-0.01, 0.1))
+
+plot7 <- CHIPoutput_all_3@Values %>%
+  mutate(Method = factor(Method, levels = rev(method_levels)),
+         label = case_when(str_detect(Method, "median") ~ "median",
+                           str_detect(Method, "IVW") ~ "IVW")) %>%
+  filter(Method %in% (c("Weighted median", "IVW"))) %>%
+  ggplot(aes(x = Estimate, y = Method, color = label)) +
+  geom_point(show.legend = F) +
+  geom_pointrange(aes(xmin = `95% CI `, xmax = ` `), show.legend = F) +
+  scale_color_discrete(type = gwas_palette[c(4, 1)]) +
+  geom_vline(xintercept = 0) +
+  theme_light() +
+  theme(axis.title.y = element_blank()) +
+  scale_x_continuous(breaks = c(0, 0.05, 0.1)) +
+  coord_cartesian(xlim = c(-0.01, 0.1))
+
+plot8 <- CHIPoutput_all_4@Values %>%
+  mutate(Method = factor(Method, levels = rev(method_levels)),
+         label = case_when(str_detect(Method, "median") ~ "median",
+                           str_detect(Method, "IVW") ~ "IVW")) %>%
+  filter(Method %in% (c("Weighted median", "IVW"))) %>%
+  ggplot(aes(x = Estimate, y = Method, color = label)) +
+  geom_point(show.legend = F) +
+  geom_pointrange(aes(xmin = `95% CI `, xmax = ` `), show.legend = F) +
+  scale_color_discrete(type = gwas_palette[c(4, 1)]) +
+  geom_vline(xintercept = 0) +
+  theme_light() +
+  theme(axis.title.y = element_blank()) +
+  scale_x_continuous(breaks = c(0, 0.05, 0.1)) +
+  coord_cartesian(xlim = c(-0.01, 0.1))
+
+ggarrange(plot1, plot5, plot2, plot6, plot3, plot7, plot4, plot8,
+          labels = c("A", "B", "C", "D", "E", "F", "G", "H"),
+          common.legend = TRUE,
+          legend = "bottom",
+          ncol = 2,
+          nrow = 4,
+          widths = c(3, 2))
+
+# ggsave(file = path(path1, "Output/Kessler/Figure_5e8_0.01_Clump.tiff"), units = "in", width = 6, height = 8, dpi = 300)
+
+tribble(~"Outcome", ~"Exposure", ~"N_SNP", ~"Egger_Int", ~"Egger_Int_P",
+              "Gout", "All CHIP (inclusive)", length(CHIPoutput_all_1@Data@snps), CHIPoutput_all_1@Values$Estimate[9], CHIPoutput_all_1@Values$`P-value`[9],
+              "Gout", "All CHIP (exclusive)", length(CHIPoutput_all_2@Data@snps), CHIPoutput_all_2@Values$Estimate[9], CHIPoutput_all_2@Values$`P-value`[9],
+              "Gout", "TET2 CHIP", length(CHIPoutput_all_3@Data@snps), CHIPoutput_all_3@Values$Estimate[9], CHIPoutput_all_3@Values$`P-value`[9],
+              "Gout", "DNMT3A CHIP", length(CHIPoutput_all_4@Data@snps), CHIPoutput_all_4@Values$Estimate[9], CHIPoutput_all_4@Values$`P-value`[9])
+```
