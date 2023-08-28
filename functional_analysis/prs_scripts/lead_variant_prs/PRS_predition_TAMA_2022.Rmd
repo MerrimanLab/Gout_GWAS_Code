@@ -1,0 +1,846 @@
+---
+title: "PRS prediction TAMA"
+author: "Ruth Topless"
+date: "`r format(Sys.Date())`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F)
+library(DT)
+library(tidyverse)
+library(magrittr)
+numcols = c("OR","LCI","UCI", "P","N")
+library(ggplot2)
+library(ggrepel)
+library(ggh4x)
+library(gridExtra)
+library(scales)
+
+results= function(test, i=2){
+  matrixoutput = matrix(nrow=1, ncol=6)
+  matrixoutput[1] <- names(coefficients(test)[i])
+  matrixoutput[2] <- round(as.numeric(exp(coefficients(test))[i]),3)#OR
+  matrixoutput[3] <- round(as.numeric(exp(coef(summary(test))[i, 1] - (1.96 * coef(summary(test))[i, 2]))),3) #LCI
+  matrixoutput[4] <- round(as.numeric(exp(coef(summary(test))[i, 1] + (1.96 * coef(summary(test))[i, 2]))),3) #UCI
+  matrixoutput[5] <- as.numeric(coef(summary(test))[i,c(4)]) #p value
+  matrixoutput[6] <- test$df.null+1
+  return ((matrixoutput))
+}
+
+# set colour palette
+#devtools::install_github("G-Thomson/Manu")
+library(Manu)
+
+gwas_palette <- c("#7ACCD7", "#115896", "#7C6C65", "#4C4C53", "#BA2F00", "#B865A1", "#6AA086")
+gwas_palette <- sort(gwas_palette)
+
+```
+
+Questions:
+Which Gout affection status =  the same as went into GWAS.
+
+adjusted by age at visit 0
+316 SNPs
+
+  no proxies used
+
+
+Extra notes: I cut the PRS range into 10 equal sized portions. I left in the lower outlier as it helps the upper limits make sense (if I cut it out the boundaries change and the prevalence of gout drops in the top group and all the graphs look a bit shit). all the prevalence/freq graphs represent the full 10 cut. In the association data I added the bottom groups together so that there were some gout cases in that group so we could get some stats. the same with the top group in women. 
+
+
+```{r genotypes, eval=FALSE}
+genotypes<-read.delim("/Volumes/biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/PRS/UKBB_GWAS_2022_all.txt")
+allsnps<-read.delim("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/loci_list/full_indepSNP_summary_updated_30Sept2022.txt")
+allsnps[allsnps==""]=NA
+
+TAMA<-allsnps[which(allsnps$TAMA=="TAMA"),]
+TAMA$risk_allele<-NA
+TAMA$risk_allele[which(TAMA$OR_TAMA>=1)]<-TAMA$MinorAllele[which(TAMA$OR_TAMA>=1)]
+TAMA$risk_allele[which(TAMA$OR_TAMA<1)]<-TAMA$MajorAllele[which(TAMA$OR_TAMA<1)]
+TAMA$oth_allele<-NA
+TAMA$oth_allele[which(TAMA$OR_TAMA>=1)]<-TAMA$MajorAllele[which(TAMA$OR_TAMA>=1)]
+TAMA$oth_allele[which(TAMA$OR_TAMA<1)]<-TAMA$MinorAllele[which(TAMA$OR_TAMA<1)]
+TAMA$effect_used<-NA
+TAMA$effect_used[which(TAMA$OR_TAMA>=1)]<-TAMA$OR_TAMA[which(TAMA$OR_TAMA>=1)]
+TAMA$effect_used[which(TAMA$OR_TAMA<1)]<-1/TAMA$OR_TAMA[which(TAMA$OR_TAMA<1)]
+
+alllist<-c("id",TAMA$SNP)
+genotypes<-genotypes[,which(colnames(genotypes) %in% alllist)]
+genotypes[genotypes==""]=NA
+genotypes[genotypes=="00"]=NA
+
+alllist[!alllist %in% colnames(genotypes)]
+
+snplist<-colnames(genotypes)[2:ncol(genotypes)]
+for(snp in snplist){
+  RISK_geno <- paste0(TAMA[which(TAMA$SNP == snp), "risk_allele"], TAMA[which(TAMA$SNP == snp), "risk_allele"], collapse = "")
+  ALT_geno <-  paste0(TAMA[which(TAMA$SNP == snp), "oth_allele"], TAMA[which(TAMA$SNP == snp), "oth_allele"], collapse = "")
+  HET1_geno <- paste0(TAMA[which(TAMA$SNP == snp), "risk_allele"], TAMA[which(TAMA$SNP == snp), "oth_allele"], collapse = "")
+  HET2_geno <- paste0(TAMA[which(TAMA$SNP == snp), "oth_allele"], TAMA[which(TAMA$SNP == snp), "risk_allele"], collapse = "")
+  genotypes[which(genotypes[, snp] == RISK_geno),snp]=2
+  genotypes[which(genotypes[, snp] == ALT_geno),snp]=0
+  genotypes[which(genotypes[, snp] == HET1_geno),snp]=1
+  genotypes[which(genotypes[, snp] == HET2_geno),snp]=1
+}
+
+genotypes[,snplist] %<>% lapply(function(x) as.numeric(as.character(x)))  
+for(snp in snplist){
+  genotypes[,snp]<-genotypes[,snp]*log(TAMA$effect_used[which(TAMA$SNP==snp)])
+}
+
+genotypes$sum<-rowSums(genotypes[2:ncol(genotypes)], na.rm = T)
+genotypes$nacount<-apply(genotypes[2:(ncol(genotypes)-1)], 1, function(x) sum(is.na(x)))
+
+genotypes$GRS<-(genotypes$sum/(316-genotypes$nacount))*(316)
+genotypes<-genotypes[which(genotypes$sum>0),]
+write.table(genotypes[,c("id","GRS")], "/Volumes/biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/PRS/UKBB_TAMA_log_grs_316_for_pheWAS.txt", row.names = F, quote = F, na="", sep="\t")
+
+```
+
+
+```{r phenotypes}
+#GRS pheWAS in ukbiobank
+pheno<-read.delim("/Volumes//biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/UKBioBank/Phenotypes/data/inital_pheno_visit0_decoded.txt", stringsAsFactors = F)
+pheno2<-pheno %>% select(f_eid, f_31_0_0, f_34_0_0,f_21000_0_0, f_189_0_0, f_54_0_0, f_21001_0_0, f_20116_0_0, f_21003_0_0)
+colnames(pheno2)<-c("f_eid", "SEX", "YEAR","ETHNICITY", "TOWNSEND", "SITE", "BMI", "SMOKER", "AGE")
+affstat<-read.delim("/Volumes/archive/merrimanlab/raid_backup/UKbiobank/genetic_files/gout_gwas_covar.20210201.covar")
+pheno2<-merge(pheno2,affstat[,c("IID","plink_goutaff")], by.x="f_eid",by.y="IID")
+pheno2$gout_AFFSTAT=NA
+pheno2$gout_AFFSTAT[which(pheno2$plink_goutaff==2)]=1
+pheno2$gout_AFFSTAT[which(pheno2$plink_goutaff==1)]=0
+pheno2<-pheno2[is.na(pheno2$gout_AFFSTAT)==F,]
+
+pheno2$ETHNICCLASS<-pheno2$ETHNICITY
+pheno2$ETHNICCLASS <- plyr::mapvalues(pheno2$ETHNICCLASS, from = c("African","White and Black African", "Black or Black British","Caribbean", "Any other Black background","White and Black Caribbean", "Asian or Asian British","Chinese","Indian","Pakistani","White and Asian","Any other Asian background", "Bangladeshi", "British","Any other white background", "Irish","White", "Prefer not to answer","Any other mixed background","Do not know","Mixed","Other ethnic group"), to = c("BLACK","BLACK","BLACK","BLACK","BLACK","BLACK","ASIAN","ASIAN","ASIAN","ASIAN","ASIAN","ASIAN","ASIAN","WHITE", "WHITE","WHITE","WHITE", "OTHER","OTHER","OTHER","OTHER","OTHER"))
+pheno2<-pheno2[which(pheno2$ETHNICCLASS=="WHITE"),]
+
+goutprs<-read.delim("/Volumes//biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/PRS/UKBB_TAMA_log_grs_316_for_pheWAS.txt")
+colnames(goutprs)<-c("f_eid","GoutPRS")
+pheno2<-merge(pheno2,goutprs, by.x="f_eid", all.x = T)
+pheno2<-pheno2[is.na(pheno2$GoutPRS)==F,]
+
+from = range(pheno2$GoutPRS, na.rm = T)[1] 
+to = range(pheno2$GoutPRS, na.rm = T)[2]
+by = (to-from)/10
+breaksgout <- seq( from = from, to = to, by = by )
+# bucketing values into bins
+
+pheno2<-pheno2 %>% mutate(GoutPRS_bins = cut(pheno2$GoutPRS, breaks=breaksgout, include.lowest=TRUE, right=FALSE))
+
+breaksgout2<-breaksgout[c(1,3:11)]
+pheno2<-pheno2 %>% mutate(GoutPRS_bins2 = cut(pheno2$GoutPRS, breaks=breaksgout2, include.lowest=TRUE, right=FALSE))
+
+breaksgout3<-breaksgout[c(1,4:9,11)]
+pheno2<-pheno2 %>% mutate(GoutPRS_bins3 = cut(pheno2$GoutPRS, breaks=breaksgout3, include.lowest=TRUE, right=FALSE))
+
+sumfilegout<-as.data.frame(table(pheno2$GoutPRS_bins))
+sumfilegout$controls<-table(pheno2$GoutPRS_bins, pheno2$gout_AFFSTAT)[1:10]
+sumfilegout$gout<-table(pheno2$GoutPRS_bins, pheno2$gout_AFFSTAT)[11:20]
+sumfilegout$prevalencegout<-round(x = (sumfilegout$gout/sumfilegout$Freq)*100, digits = 3)
+sumfilegout %>%  datatable(., caption = "GoutPRS bins and gout prevalence", escape = F, options = list(pageLength = 30, autoWidth = TRUE) , rownames = F)
+
+f<-ggplot(sumfilegout, aes(Var1,Freq))+geom_col(color="black", alpha=1, fill=gwas_palette[1])+theme_light(base_size = 12)+
+  xlab("Polygenic Risk Score (bins)")+ylab("Count")+
+  theme( axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20)))
+f
+
+
+a<-sumfilegout %>% mutate(Var1_number = as.numeric(Var1)) %>% ggplot( aes(Var1_number,prevalencegout))+geom_line()+theme_light(base_size = 12)+
+  xlab("Polygenic Risk Score (bins)")+ylab("Gout Prevalence (%)")+
+  theme( axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20))) + scale_x_continuous(labels = as.character(sumfilegout$Var1), breaks = 1:nlevels(sumfilegout$Var1))
+a
+
+
+resulttable <- as.data.frame(matrix(ncol=6, nrow=0))
+colnames(resulttable)<-c("name","OR","LCI","UCI", "P","N" )
+pheno2$GoutPRS_bins2<-pheno2$GoutPRS_bins
+
+pheno2$GoutPRS_bins2[which(pheno2$GoutPRS_bins2=="[11.7,12.3)")]=NA
+pheno2$GoutPRS_bins2<-factor(pheno2$GoutPRS_bins2, levels =c("[13.9,14.5)","[12.3,12.8)", "[12.8,13.4)", "[13.4,13.9)",  "[14.5,15.1)", "[15.1,15.6)", "[15.6,16.2)", "[16.2,16.8)", "[16.8,17.3]" ))
+test<-glm(gout_AFFSTAT~GoutPRS_bins2+AGE+SEX, data=pheno2, family = 'binomial') 
+
+for(b in seq(2:10)){
+    resulttable[b,]<-results(test=test,i=b)
+}
+#replace intercept info with reference bin data
+resulttable[1,]<-c("[13.9,14.5)","1","1","1",NA, NA)
+#insert nice names
+resulttable[,1]<-c("[13.9,14.5)","[12.3,12.8)", "[12.8,13.4)", "[13.4,13.9)",  "[14.5,15.1)", "[15.1,15.6)", "[15.6,16.2)", "[16.2,16.8)", "[16.8,17.3]")
+
+resulttable[,numcols] %<>% lapply(function(x) as.numeric(as.character(x)))  
+#add significance  stars for plotting 
+resulttable$sig<-NA
+resulttable$sig[which(resulttable$P<0.05)]="*"
+resulttable$sig[which(resulttable$P<0.01)]="**"
+resulttable$sig[which(resulttable$P<0.001)]="***"
+
+#reorder results
+resulttable$name <- factor(resulttable$name, levels = c("[12.3,12.8)", "[12.8,13.4)", "[13.4,13.9)", "[13.9,14.5)", "[14.5,15.1)", "[15.1,15.6)", "[15.6,16.2)", "[16.2,16.8)", "[16.8,17.3]"))
+resulttable$labelpos<-ifelse(resulttable$OR <= 1, resulttable$LCI, resulttable$UCI)
+
+
+ggplot(data=resulttable, aes(x=name, y=OR)) + theme_light(base_size = 12)+
+  geom_bar(stat="identity", color="black", alpha=1, fill= "#115896") +
+  labs( y= "Odds Ratio", x = "Gout Risk Factor") +
+  theme( axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20))) + 
+  scale_y_log10(limits = c(0.005,160)) + 
+  geom_errorbar(aes(ymin=LCI, ymax=UCI), width=.2, position=position_dodge(.9)) +
+  geom_text_repel(aes(x=name, y=labelpos, label = sig), na.rm = T, nudge_y = ifelse(resulttable$labelpos <=1, -0.09, +0.01))
+
+
+
+resulttable %>%  datatable(., caption = "Logisitic regression Gout ~ GRS bins", escape = F, options = list(pageLength = 30, autoWidth = TRUE) , rownames = F)
+
+
+```
+
+##  AUROC
+
+```{r, echo=TRUE}
+# ggplot(sumfile_all, aes(Var1,Freq))+theme_light(base_size = 12)+
+#   geom_col(color="black", alpha=1, aes(fill=sex))+
+#   ylab("Count")+
+#   scale_fill_manual(values=gwas_palette)+
+#   scale_x_discrete(expand = c(0.1,0.1))+
+#   theme(axis.text.x = element_blank(), legend.position = "none", axis.title.x = element_blank())+
+#   facet_wrap(~sex)
+
+library(pROC)
+
+test_dataset<-pheno2[,c("f_eid","SEX","AGE","GoutPRS","gout_AFFSTAT")]
+test_dataset<-na.omit(test_dataset)
+colnames(test_dataset)[5]="affstat"
+
+#full unadjusted
+full_roc<-roc(affstat ~ GoutPRS, data=test_dataset)   #Compute AUC for predicting case with the variable age
+ggroc(full_roc)+theme_light(base_size = 12)
+
+#full adjusted
+mod1<-glm(affstat ~ GoutPRS+ AGE+as.factor(SEX), data=test_dataset, family="binomial")  #Logistic regression model
+full_roc_adj<-roc(affstat  ~ predict(mod1), data=test_dataset)  #Compute AUC for predicting case with your model
+ggroc(list(full_roc,full_roc_adj))+theme_light(base_size = 12)
+
+#age and sex
+mod1<-glm(affstat ~ AGE+as.factor(SEX), data=test_dataset, family="binomial")  #Logistic regression model
+a_s_roc<-roc(affstat  ~ predict(mod1), data=test_dataset)  #Compute AUC for predicting case with your model
+
+roclist <- list("Trans-ancestry PRS" = full_roc,
+                "Demographic" = a_s_roc,
+                "Combined" = full_roc_adj)
+
+ggroc_full<-ggroc(roclist)+
+  theme_light(base_size = 12)+
+  scale_colour_manual(values = c("#7ACCD7", "#B865A1","#7C6C65"))+
+  theme(legend.position="bottom")+
+  labs(x = "Specificity", y = "Sensitivity", colour="AUROC model")
+  
+
+
+#males
+test_dataset_males<-test_dataset[which(test_dataset$SEX==1),]
+male_roc<-roc(affstat ~ GoutPRS, data=test_dataset_males)   #Compute AUC for predicting case with the variable age
+#full adjusted
+mod1<-glm(affstat ~ GoutPRS+ AGE, data=test_dataset_males, family="binomial")  #Logistic regression model
+male_roc_adj<-roc(affstat  ~ predict(mod1), data=test_dataset_males)  #Compute AUC for predicting case with your model
+
+male_roc_age<-roc(affstat  ~ AGE, data=test_dataset_males)
+
+roclist <- list("Trans-ancestry PRS" = male_roc,
+                "Demographic" = male_roc_age,
+                "Combined" = male_roc_adj)
+
+ggroc_males<-ggroc(roclist)+
+  theme_light(base_size = 12)+
+  scale_colour_manual(values = c("#7ACCD7", "#B865A1","#7C6C65"))+
+  theme(legend.position="bottom")+
+  labs(x = "Specificity", y = "Sensitivity", colour="AUROC model")
+  
+#females
+test_dataset_females<-test_dataset[which(test_dataset$SEX==0),]
+female_roc<-roc(affstat ~ GoutPRS, data=test_dataset_females)   #Compute AUC for predicting case with the variable age
+#full adjusted
+mod1<-glm(affstat ~ GoutPRS+ AGE, data=test_dataset_females, family="binomial")  #Logistic regression model
+female_roc_adj<-roc(affstat  ~ predict(mod1), data=test_dataset_females)  #Compute AUC for predicting case with your model
+
+female_roc_age<-roc(affstat  ~ AGE, data=test_dataset_females)
+
+roclist <- list("Trans-ancestry PRS" = female_roc,
+                "Demographic" = female_roc_age,
+                "Combined" = female_roc_adj)
+
+ggroc_females<-ggroc(roclist)+
+  theme_light(base_size = 12)+
+  scale_colour_manual(values = c("#7ACCD7", "#B865A1","#7C6C65"))+
+  theme(legend.position="bottom")+
+  labs(x = "Specificity", y = "Sensitivity", colour="AUROC model")
+
+ggroc_females
+
+```
+
+# Males
+
+```{r,eval=T}
+males<-pheno2[which(pheno2$SEX==1),]
+sumfilegout_males<-as.data.frame(table(males$GoutPRS_bins))
+sumfilegout_males$controls<-table(males$GoutPRS_bins, males$gout_AFFSTAT)[1:10]
+sumfilegout_males$gout<-table(males$GoutPRS_bins, males$gout_AFFSTAT)[11:20]
+sumfilegout_males$prevalencegout<- round(x = (sumfilegout_males$gout/sumfilegout_males$Freq)*100, digits = 3)
+
+f<-ggplot(sumfilegout_males, aes(Var1,Freq))+geom_col(color="black", alpha=1, fill=gwas_palette[2])+theme_light(base_size = 12)+
+  xlab("Polygenic Risk Score (bins)")+ylab("Gout Prevalence (%)")+
+  theme( axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20)))
+f
+
+
+a<-sumfilegout_males %>% mutate(Var1_number = as.numeric(Var1)) %>% ggplot( aes(Var1_number,prevalencegout))+geom_line()+theme_light(base_size = 12)+
+  xlab("Polygenic Risk Score (bins)")+ylab("Gout Prevalence (%)")+
+  theme( axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20))) + scale_x_continuous(labels = as.character(sumfilegout_males$Var1), breaks = 1:nlevels(sumfilegout_males$Var1))
+a
+
+sumfilegout_males %>%  datatable(., caption = "GoutPRS bins and gout prevalence in males", escape = F, options = list(pageLength = 30, autoWidth = TRUE) , rownames = F)
+
+resulttable_males <- as.data.frame(matrix(ncol=6, nrow=0))
+colnames(resulttable_males)<-c("name","OR","LCI","UCI", "P","N" )
+males$GoutPRS_bins2<-factor(males$GoutPRS_bins2, levels =c("[13.9,14.5)","[12.3,12.8)", "[12.8,13.4)", "[13.4,13.9)",  "[14.5,15.1)", "[15.1,15.6)", "[15.6,16.2)", "[16.2,16.8)", "[16.8,17.3]"))
+test<-glm(males$gout_AFFSTAT ~ males$GoutPRS_bins2 + males$AGE, data=males, family = 'binomial') 
+
+for(b in seq(1:9)){
+    resulttable_males[b,]<-results(test=test,i=b)
+}
+
+#replace intercept info with reference bin data
+resulttable_males[1,]<-c("[13.9,14.5)","1","1","1",NA,NA)
+#insert nice names
+resulttable_males[,1]<-c("[13.9,14.5)","[12.3,12.8)", "[12.8,13.4)", "[13.4,13.9)",  "[14.5,15.1)", "[15.1,15.6)", "[15.6,16.2)", "[16.2,16.8)", "[16.8,17.3]")
+
+resulttable_males[,numcols] %<>% lapply(function(x) as.numeric(as.character(x)))  
+
+resulttable_males$sig<-NA
+resulttable_males$sig[which(resulttable_males$P<0.05)]="*"
+resulttable_males$sig[which(resulttable_males$P<0.01)]="**"
+resulttable_males$sig[which(resulttable_males$P<0.001)]="***"
+
+resulttable_males$name <- factor(resulttable_males$name, levels  = c( "[12.3,12.8)", "[12.8,13.4)", "[13.4,13.9)","[13.9,14.5)",  "[14.5,15.1)", "[15.1,15.6)", "[15.6,16.2)", "[16.2,16.8)", "[16.8,17.3]"))
+resulttable_males$labelpos<-ifelse(resulttable_males$OR < 1, resulttable_males$LCI, resulttable_males$UCI)
+
+ggplot(data=resulttable_males, aes(x=name, y=OR))  + theme_light(base_size = 12)+
+  geom_bar(stat="identity", colour="black", fill= gwas_palette[2]) +
+  labs( y= "Odds Ratio", x = "Polygenic Risk Score (bins)") +
+  theme( axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20))) + 
+  scale_y_log10(limits = c(0.005,220)) + 
+  geom_errorbar(aes(ymin=LCI, ymax=UCI), width=.2, position=position_dodge(.9)) +
+  geom_text_repel(aes(x=name, y=labelpos, label = sig), na.rm = T, nudge_y = ifelse(resulttable_males$labelpos <=1, -0.09, +0.01))
+
+resulttable_males %>%  datatable(., caption = "Logisitic regression Gout ~ GRS bins in males ", escape = F, options = list(pageLength = 30, autoWidth = TRUE) , rownames = F)
+```
+
+# Females
+
+```{r,eval=T}
+females<-pheno2[which(pheno2$SEX==0),]
+
+sumfilegout_females<-as.data.frame(table(females$GoutPRS_bins))
+sumfilegout_females$controls<-table(females$GoutPRS_bins, females$gout_AFFSTAT)[1:10]
+sumfilegout_females$gout<-table(females$GoutPRS_bins, females$gout_AFFSTAT)[11:20]
+sumfilegout_females$prevalencegout<- round(x = (sumfilegout_females$gout/sumfilegout_females$Freq)*100, digits = 3)
+
+f<-ggplot(sumfilegout_females, aes(Var1,Freq))+geom_col(color="black", alpha=1, fill=gwas_palette[3])+theme_light(base_size = 12)+
+  xlab("Polygenic Risk Score (bins)")+ylab("Count")+
+  theme( axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20)))
+f
+
+a<-sumfilegout_females %>% mutate(Var1_number = as.numeric(Var1)) %>% ggplot( aes(Var1_number,prevalencegout))+geom_line()+theme_light(base_size = 12)+
+  xlab("Polygenic Risk Score (bins)")+ylab("Gout Prevalence (%)")+
+  theme( axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20))) +    scale_x_continuous(labels = as.character(sumfilegout_females$Var1), breaks = 1:nlevels(sumfilegout_females$Var1))
+a
+
+
+sumfilegout_females %>%  datatable(., caption = "GoutPRS bins and gout prevalence in females", escape = F, options = list(pageLength = 30, autoWidth = TRUE) , rownames = F)
+
+
+females$GoutPRS_bins2<-females$GoutPRS_bins
+females$GoutPRS_bins2[which(females$GoutPRS_bins2=="[11.7,12.3)")]<-NA
+females$GoutPRS_bins2[which(females$GoutPRS_bins2=="[12.3,12.8)")]<-NA
+females$GoutPRS_bins2[which(females$GoutPRS_bins2=="[16.8,17.3]")]<-NA
+
+females$GoutPRS_bins2<-factor(females$GoutPRS_bins2, levels =c("[13.9,14.5)", "[12.8,13.4)", "[13.4,13.9)",  "[14.5,15.1)", "[15.1,15.6)", "[15.6,16.2)", "[16.2,16.8)"))
+resulttable_females <- as.data.frame(matrix(ncol=6, nrow=0))
+colnames(resulttable_females)<-c("name","OR","LCI","UCI", "P","N" )
+
+test<-glm(females$gout_AFFSTAT ~ females$GoutPRS_bins2 + females$AGE, data=females, family = 'binomial') 
+
+for(b in seq(1:7)){
+    resulttable_females[b,]<-results(test=test,i=b)
+}
+
+#replace intercept info with reference bin data
+resulttable_females[1,]<-c("[13.9,14.5)","1","1","1",NA,NA)
+#insert nice names
+resulttable_females[,1]<-c("[13.9,14.5)","[12.8,13.4)", "[13.4,13.9)",  "[14.5,15.1)", "[15.1,15.6)", "[15.6,16.2)", "[16.2,16.8)")
+
+resulttable_females[,numcols] %<>% lapply(function(x) as.numeric(as.character(x)))  
+
+resulttable_females$sig<-NA
+resulttable_females$sig[which(resulttable_females$P<0.05)]="*"
+resulttable_females$sig[which(resulttable_females$P<0.01)]="**"
+resulttable_females$sig[which(resulttable_females$P<0.001)]="***"
+
+resulttable_females$name <- factor(resulttable_females$name, levels  = c("[12.8,13.4)", "[13.4,13.9)","[13.9,14.5)",  "[14.5,15.1)", "[15.1,15.6)", "[15.6,16.2)", "[16.2,16.8)"))
+resulttable_females$labelpos<-ifelse(resulttable_females$OR < 1, resulttable_females$LCI, resulttable_females$UCI)
+
+
+ggplot(data=resulttable_females, aes(x=name, y=OR)) + theme_light(base_size = 12)+
+  geom_bar(stat="identity", color="black", alpha=1, fill= gwas_palette[3]) +
+  labs( y= "Odds Ratio", x = "Polygenic Risk Score (bins)") +
+  theme( axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20))) + 
+  scale_y_log10(limits = c(0.1,30)) + 
+  geom_errorbar(aes(ymin=LCI, ymax=UCI), width=.2, position=position_dodge(.9)) +
+  geom_text_repel(aes(x=name, y=labelpos, label = sig), na.rm = T, nudge_y = ifelse(resulttable_females$labelpos <=1, -0.09, +0.01))
+
+
+resulttable_females %>%  datatable(., caption = "Logisitic regression Gout ~ GRS bins in females ", escape = F, options = list(pageLength = 30, autoWidth = TRUE) , rownames = F)
+```
+
+```{r}
+library(gridExtra)
+sumfilegout$sex="Full"
+sumfilegout_males$sex="Male"
+sumfilegout_females$sex="Female"
+sumfile_all<-rbind(sumfilegout, sumfilegout_males,sumfilegout_females)
+sumfile_all$sex<-factor(sumfile_all$sex, levels = c("Full", "Male", "Female"))
+
+resulttable$sex="Full"
+resulttable_males$sex="Male"
+resulttable_females$sex="Female"
+resulttable_all<-rbind(resulttable, resulttable_males,resulttable_females)
+resulttable_all$name<-factor(resulttable_all$name, levels =  c("[11.7,12.3)","[12.3,12.8)", "[12.8,13.4)", "[13.4,13.9)", "[13.9,14.5)", "[14.5,15.1)", "[15.1,15.6)", "[15.6,16.2)", "[16.2,16.8)", "[16.8,17.3]")) 
+resulttable_all$sex<-factor(resulttable_all$sex, levels = c("Full", "Male", "Female"))
+resulttable_all[26,]<-c("[11.7,12.3)", NA,NA,NA,NA,NA,NA,NA, "Full")
+resulttable_all[27,]<-c("[11.7,12.3)", NA,NA,NA,NA,NA,NA,NA, "Male")
+resulttable_all[28,]<-c("[11.7,12.3)", NA,NA,NA,NA,NA,NA,NA, "Female")
+
+resulttable_all$OR<-as.numeric(resulttable_all$OR)
+resulttable_all$UCI<-as.numeric(resulttable_all$UCI)
+resulttable_all$LCI<-as.numeric(resulttable_all$LCI)
+resulttable_all$labelpos<-as.numeric(resulttable_all$labelpos)
+
+A<-ggplot(sumfile_all, aes(Var1,Freq))+theme_light(base_size = 12)+
+  geom_col(color="black", alpha=1, aes(fill=sex))+
+  ylab("Count")+
+  scale_fill_manual(values=gwas_palette)+
+  scale_x_discrete(expand = c(0.1,0.1))+
+  theme(axis.text.x = element_blank(), legend.position = "none", axis.title.x = element_blank())+
+  facet_wrap(~sex)
+A
+
+B<-sumfile_all %>% mutate(Var1_number = as.numeric(Var1)) %>% ggplot(aes(Var1_number,prevalencegout))+
+  geom_line(aes(colour=sex))+theme_light(base_size = 12)+
+  scale_colour_manual(values=gwas_palette)+
+  ylab("Gout Prevalence (%)")+
+  theme(axis.text.x = element_blank(), legend.position = "none", axis.title.x = element_blank(),
+        axis.title.y = element_text(margin = margin(t = 0, r = 22, b = 0, l = 0)))+    
+  scale_x_continuous(labels = NULL, breaks = 1:nlevels(sumfile_all$Var1), minor_breaks=NULL, expand = c(0.1, 0.1))+ 
+  facet_wrap(~sex)
+B
+
+C<-ggplot(data=resulttable_all, aes(x=name, y=OR)) + theme_light(base_size = 12)+
+  geom_bar(stat="identity", color="black", alpha=1, aes(fill=sex),na.rm = T) +
+  scale_fill_manual(values=gwas_palette)+
+  labs( y= "Odds Ratio", x = "Polygenic Risk Score (bins)") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 10)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 8.5, b = 0, l = 0)))+ 
+  geom_errorbar(aes(ymin=LCI, ymax=UCI), width=.2, position=position_dodge(.9), na.rm = T) +
+  geom_text_repel(aes(x=name, y=labelpos, label = sig), na.rm = T, nudge_y = ifelse(resulttable_all$labelpos <=1, -0.1, +0.1),size =2.5)+
+  scale_y_log10(expand=c(0.12,0.12),labels = comma)+
+  scale_x_discrete(expand = c(0.1,0.1))+
+  facet_wrap(~sex)
+C
+
+
+
+ggroc_f<-ggroc_females[["data"]]
+ggroc_a<-ggroc_full[["data"]]
+ggroc_m<-ggroc_males[["data"]]
+ggroc_f$sex="Female"
+ggroc_a$sex="Full"
+ggroc_m$sex="Male"
+ggroc<-rbind(ggroc_a, ggroc_m, ggroc_f)
+ggroc$sex<-factor(ggroc$sex, levels =c("Full", "Male", "Female"))
+
+ggroc$adjusted_specificity<-1-ggroc$specificity
+
+
+D <-ggplot(data = ggroc, aes(x=adjusted_specificity, y=sensitivity))+
+  geom_line(aes(colour=name))+theme_light(base_size = 12)+
+  scale_colour_manual(values=c("#7ACCD7", "#B865A1","#7C6C65"))+
+  labs(x = "1-Specificity", y = "Sensitivity", colour="AUROC model")+
+  theme(legend.position = "bottom", legend.margin = margin(t = 0, r = 0, b = 0, l = 0), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),axis.title.x = element_text(margin = margin(t = 10, b=0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 16, b = 0, l = 0)))+    
+ facet_wrap(~sex)
+D
+
+
+png(filename = "/Volumes//biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/PRS/SuppFig_TAMA_full_PRS.png", width = 7, height = 12, units = "in", res = 300)
+grid.arrange(A + 
+               theme(plot.margin = unit(c(0,0.25,0,0.25), "cm"), plot.tag = element_text()) + 
+               labs(tag = "A"),
+             B + 
+               theme(plot.margin = unit(c(0,0.25,0,0.25), "cm"), plot.tag = element_text()) + 
+               labs(tag = "B"),
+             C + 
+               theme(plot.margin = unit(c(0,0.25,0,0.25), "cm"), plot.tag = element_text()) + 
+               labs(tag = "C"),
+             D +
+               theme(plot.margin = unit(c(0.25,0.25,0.25,0.25), "cm"), plot.tag = element_text()) + 
+               labs(tag = "D"),
+             layout_matrix = matrix( c(1,2,3,4), ncol = 1), heights = c(5,5,7,6))
+dev.off()
+
+```
+
+
+# Male GWAS =  PRS 265 SNPs
+```{r, eval=F}
+genotypes<-read.delim("/Volumes/biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/PRS/UKBB_GWAS_2022_all.txt")
+allsnps<-read.delim("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/loci_list/male_indepSNP_summary_updated_30Sept2022.txt")
+allsnps[allsnps==""]=NA
+
+TAMA<-allsnps[which(allsnps$TAMA=="TAMA"),]
+TAMA$risk_allele<-NA
+TAMA$risk_allele[which(TAMA$OR_TAMA>=1)]<-TAMA$MinorAllele[which(TAMA$OR_TAMA>=1)]
+TAMA$risk_allele[which(TAMA$OR_TAMA<1)]<-TAMA$MajorAllele[which(TAMA$OR_TAMA<1)]
+TAMA$oth_allele<-NA
+TAMA$oth_allele[which(TAMA$OR_TAMA>=1)]<-TAMA$MajorAllele[which(TAMA$OR_TAMA>=1)]
+TAMA$oth_allele[which(TAMA$OR_TAMA<1)]<-TAMA$MinorAllele[which(TAMA$OR_TAMA<1)]
+TAMA$effect_used<-NA
+TAMA$effect_used[which(TAMA$OR_TAMA>=1)]<-TAMA$OR_TAMA[which(TAMA$OR_TAMA>=1)]
+TAMA$effect_used[which(TAMA$OR_TAMA<1)]<-1/TAMA$OR_TAMA[which(TAMA$OR_TAMA<1)]
+
+alllist<-c("id",TAMA$SNP)
+genotypes<-genotypes[,which(colnames(genotypes) %in% alllist)]
+genotypes[genotypes==""]=NA
+genotypes[genotypes=="00"]=NA
+
+alllist[!alllist %in% colnames(genotypes)]
+
+snplist<-colnames(genotypes)[2:ncol(genotypes)]
+for(snp in snplist){
+  RISK_geno <- paste0(TAMA[which(TAMA$SNP == snp), "risk_allele"], TAMA[which(TAMA$SNP == snp), "risk_allele"], collapse = "")
+  ALT_geno <-  paste0(TAMA[which(TAMA$SNP == snp), "oth_allele"], TAMA[which(TAMA$SNP == snp), "oth_allele"], collapse = "")
+  HET1_geno <- paste0(TAMA[which(TAMA$SNP == snp), "risk_allele"], TAMA[which(TAMA$SNP == snp), "oth_allele"], collapse = "")
+  HET2_geno <- paste0(TAMA[which(TAMA$SNP == snp), "oth_allele"], TAMA[which(TAMA$SNP == snp), "risk_allele"], collapse = "")
+  genotypes[which(genotypes[, snp] == RISK_geno),snp]=2
+  genotypes[which(genotypes[, snp] == ALT_geno),snp]=0
+  genotypes[which(genotypes[, snp] == HET1_geno),snp]=1
+  genotypes[which(genotypes[, snp] == HET2_geno),snp]=1
+}
+
+
+genotypes[,snplist] %<>% lapply(function(x) as.numeric(as.character(x)))  
+for(snp in snplist){
+  genotypes[,snp]<-genotypes[,snp]*log(TAMA$effect_used[which(TAMA$SNP==snp)])
+}
+
+genotypes$sum<-rowSums(genotypes[2:ncol(genotypes)], na.rm = T)
+genotypes$nacount<-apply(genotypes[2:(ncol(genotypes)-1)], 1, function(x) sum(is.na(x)))
+
+genotypes$GRS<-(genotypes$sum/(265-genotypes$nacount))*(265)
+genotypes<-genotypes[which(genotypes$sum>0),]
+write.table(genotypes[,c("id","GRS")], "/Volumes/biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/PRS/UKBB_TAMA_MALE_log_grs_265_for_pheWAS.txt", row.names = F, quote = F, na="", sep="\t")
+
+```
+
+
+
+```{r,eval=T}
+goutprs<-read.delim("/Volumes/biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/PRS/UKBB_TAMA_MALE_log_grs_265_for_pheWAS.txt")
+colnames(goutprs)<-c("f_eid","GoutPRS")
+pheno2<-pheno2[,c("f_eid","SEX","YEAR","ETHNICITY","TOWNSEND","SITE","BMI","SMOKER","AGE","plink_goutaff","gout_AFFSTAT","ETHNICCLASS")]
+
+pheno2<-merge(pheno2,goutprs, by.x="f_eid", all.x = T)
+pheno2<-pheno2[is.na(pheno2$GoutPRS)==F,]
+males<-pheno2[which(pheno2$SEX==1),]
+
+
+from = range(males$GoutPRS, na.rm = T)[1] 
+to = range(males$GoutPRS, na.rm = T)[2]
+by = (to-from)/10
+breaksgout <- seq( from = from, to = to, by = by )
+# bucketing values into bins
+
+males<-males %>% mutate(GoutPRS_bins = cut(males$GoutPRS, breaks=breaksgout, include.lowest=TRUE, right=FALSE))
+
+breaksgout2<-breaksgout[c(1,3:11)]
+males<-males %>% mutate(GoutPRS_bins2 = cut(males$GoutPRS, breaks=breaksgout2, include.lowest=TRUE, right=FALSE))
+
+breaksgout3<-breaksgout[c(1,3:9,11)]
+males<-males %>% mutate(GoutPRS_bins3 = cut(males$GoutPRS, breaks=breaksgout3, include.lowest=TRUE, right=FALSE))
+
+males$GoutPRS_bins<-sub("12,","12.0,",males$GoutPRS_bins)
+males$GoutPRS_bins<-sub("12)","12.0)",males$GoutPRS_bins)
+sumfilegout_males<-as.data.frame(table(males$GoutPRS_bins))
+sumfilegout_males$controls<-table(males$GoutPRS_bins, males$gout_AFFSTAT)[1:10]
+sumfilegout_males$gout<-table(males$GoutPRS_bins, males$gout_AFFSTAT)[11:20]
+sumfilegout_males$prevalencegout<- round(x = (sumfilegout_males$gout/sumfilegout_males$Freq)*100, digits = 3)
+
+f<-ggplot(sumfilegout_males, aes(Var1,Freq))+geom_col(color="black", alpha=1, fill=gwas_palette[2])+theme_light(base_size = 12)+
+  xlab("Polygenic Risk Score (bins)")+ylab("Count")+
+  theme( axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20)))
+f
+
+a<-sumfilegout_males %>% mutate(Var1_number = as.numeric(Var1)) %>% ggplot( aes(Var1_number,prevalencegout))+geom_line()+theme_light(base_size = 12)+
+  xlab("Polygenic Risk Score (bins)")+ylab("Gout Prevalence (%)")+
+  theme( axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20))) + scale_x_continuous(labels = as.character(sumfilegout_males$Var1), breaks = 1:nlevels(sumfilegout_males$Var1))
+a
+
+
+sumfilegout_males %>%  datatable(., caption = "GoutPRS bins and gout prevalence in males", escape = F, options = list(pageLength = 30, autoWidth = TRUE) , rownames = F)
+
+resulttable_males <- as.data.frame(matrix(ncol=6, nrow=0))
+colnames(resulttable_males)<-c("name","OR","LCI","UCI", "P","N" )
+males$GoutPRS_bins2<-males$GoutPRS_bins
+males$GoutPRS_bins2[which(males$GoutPRS_bins2=="[11.3,12.0)")]=NA
+
+males$GoutPRS_bins2<-factor(males$GoutPRS_bins2, levels =c( "[13.8,14.4)","[12.0,12.6)", "[12.6,13.2)", "[13.2,13.8)", "[14.4,15.1)", "[15.1,15.7)", "[15.7,16.3)", "[16.3,16.9)", "[16.9,17.5]" ))
+test<-glm(males$gout_AFFSTAT ~ males$GoutPRS_bins2 + males$AGE, data=males, family = 'binomial') 
+
+for(b in seq(1:9)){
+    resulttable_males[b,]<-results(test=test,i=b)
+}
+
+#replace intercept info with reference bin data
+resulttable_males[1,]<-c("[13.8,14.4)","1","1","1",NA,NA)
+#insert nice names
+resulttable_males[,1]<-c("[13.8,14.4)","[12.0,12.6)", "[12.6,13.2)", "[13.2,13.8)", "[14.4,15.1)", "[15.1,15.7)", "[15.7,16.3)", "[16.3,16.9)", "[16.9,17.5]")
+
+resulttable_males[,numcols] %<>% lapply(function(x) as.numeric(as.character(x)))  
+
+resulttable_males$sig<-NA
+resulttable_males$sig[which(resulttable_males$P<0.05)]="*"
+resulttable_males$sig[which(resulttable_males$P<0.01)]="**"
+resulttable_males$sig[which(resulttable_males$P<0.001)]="***"
+
+resulttable_males$name <- factor(resulttable_males$name, levels  = c("[12.0,12.6)", "[12.6,13.2)", "[13.2,13.8)","[13.8,14.4)", "[14.4,15.1)", "[15.1,15.7)", "[15.7,16.3)", "[16.3,16.9)", "[16.9,17.5]" ))
+resulttable_males$labelpos<-ifelse(resulttable_males$OR < 1, resulttable_males$LCI, resulttable_males$UCI)
+
+ggplot(data=resulttable_males, aes(x=name, y=OR))  + theme_light(base_size = 12)+
+  geom_bar(stat="identity", colour="black", fill= gwas_palette[2]) +
+  labs( y= "Odds Ratio", x = "Polygenic Risk Score (bins)") +
+  theme( axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20))) + 
+  scale_y_log10(limits = c(0.005,1000)) + 
+  geom_errorbar(aes(ymin=LCI, ymax=UCI), width=.2, position=position_dodge(.9)) +
+  geom_text_repel(aes(x=name, y=labelpos, label = sig), na.rm = T, nudge_y = ifelse(resulttable_males$labelpos <=1, -0.09, +0.01))
+
+
+
+
+resulttable_males %>%  datatable(., caption = "Logisitic regression Gout ~ GRS bins in males ", escape = F, options = list(pageLength = 30, autoWidth = TRUE) , rownames = F)
+
+write.table(sumfilegout_males,"/Volumes/biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/PRS/TAMA_maleGRS_summary_table.txt", quote = F, sep="\t", na="", row.names = F)
+write.table(resulttable_males,"/Volumes/biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/PRS/TAMA_maleGRS_results_table.txt", quote = F, sep="\t", na="", row.names = F)
+
+test_dataset<-males[,c("f_eid","SEX","AGE","GoutPRS","gout_AFFSTAT")]
+test_dataset<-na.omit(test_dataset)
+colnames(test_dataset)[5]="affstat"
+
+#full unadjusted
+full_roc<-roc(affstat ~ GoutPRS, data=test_dataset)   #Compute AUC for predicting case with the variable age
+ggroc(full_roc)+theme_light(base_size = 12)
+
+#full adjusted
+mod1<-glm(affstat ~ GoutPRS+ AGE, data=test_dataset, family="binomial")  #Logistic regression model
+full_roc_adj<-roc(affstat  ~ predict(mod1), data=test_dataset)  #Compute AUC for predicting case with your model
+ggroc(list(full_roc,full_roc_adj))+theme_light(base_size = 12)
+
+#age and sex
+mod1<-glm(affstat ~ AGE, data=test_dataset, family="binomial")  #Logistic regression model
+a_s_roc<-roc(affstat  ~ predict(mod1), data=test_dataset)  #Compute AUC for predicting case with your model
+
+roclist <- list("Male PRS" = full_roc,
+                "Demographic" = a_s_roc,
+                "Combined" = full_roc_adj)
+
+ggroc_male_PRS<-ggroc(roclist)+
+  theme_light(base_size = 12)+
+  scale_colour_manual(values = c("#7ACCD7", "#B865A1","#7C6C65"))+
+  theme(legend.position="bottom")+
+  labs(x = "Specificity", y = "Sensitivity", colour="AUROC model")
+ggroc_male_PRS
+
+write.table(ggroc_male_PRS[["data"]],"/Volumes/biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/PRS/TAMA_maleGRS_ROC.txt", quote = F, sep="\t", na="", row.names = F)
+
+```
+
+# Female GWAS PRS = 17 SNPs
+
+```{r, eval=F}
+genotypes<-read.delim("/Volumes/biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/PRS/UKBB_GWAS_2022_all.txt")
+allsnps<-read.delim("/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/loci_list/female_indepSNP_summary_updated_30Sept2022.txt")
+allsnps[allsnps==""]=NA
+allsnps<-allsnps[,c(1:13,42:44)]
+
+
+#allsnps[40,]<-c("chr22_44.27_44.43MB","","22","44324730","rs738408","T",	"C","female", "",  "", "", "","TAMA","0.931935766","0.008","7.82725")
+
+TAMA<-allsnps[which(allsnps$TAMA=="TAMA"),]
+TAMA$OR_TAMA<-as.numeric(TAMA$OR_TAMA)
+TAMA$risk_allele<-NA
+TAMA$risk_allele[which(TAMA$OR_TAMA>=1)]<-TAMA$MinorAllele[which(TAMA$OR_TAMA>=1)]
+TAMA$risk_allele[which(TAMA$OR_TAMA<1)]<-TAMA$MajorAllele[which(TAMA$OR_TAMA<1)]
+TAMA$oth_allele<-NA
+TAMA$oth_allele[which(TAMA$OR_TAMA>=1)]<-TAMA$MajorAllele[which(TAMA$OR_TAMA>=1)]
+TAMA$oth_allele[which(TAMA$OR_TAMA<1)]<-TAMA$MinorAllele[which(TAMA$OR_TAMA<1)]
+TAMA$effect_used<-NA
+TAMA$effect_used[which(TAMA$OR_TAMA>=1)]<-TAMA$OR_TAMA[which(TAMA$OR_TAMA>=1)]
+TAMA$effect_used[which(TAMA$OR_TAMA<1)]<-1/TAMA$OR_TAMA[which(TAMA$OR_TAMA<1)]
+
+alllist<-c("id",TAMA$SNP)
+genotypes<-genotypes[,which(colnames(genotypes) %in% alllist)]
+genotypes[genotypes==""]=NA
+genotypes[genotypes=="00"]=NA
+
+alllist[!alllist %in% colnames(genotypes)]
+
+snplist<-colnames(genotypes)[2:ncol(genotypes)]
+for(snp in snplist){
+  RISK_geno <- paste0(TAMA[which(TAMA$SNP == snp), "risk_allele"], TAMA[which(TAMA$SNP == snp), "risk_allele"], collapse = "")
+  ALT_geno <-  paste0(TAMA[which(TAMA$SNP == snp), "oth_allele"], TAMA[which(TAMA$SNP == snp), "oth_allele"], collapse = "")
+  HET1_geno <- paste0(TAMA[which(TAMA$SNP == snp), "risk_allele"], TAMA[which(TAMA$SNP == snp), "oth_allele"], collapse = "")
+  HET2_geno <- paste0(TAMA[which(TAMA$SNP == snp), "oth_allele"], TAMA[which(TAMA$SNP == snp), "risk_allele"], collapse = "")
+  genotypes[which(genotypes[, snp] == RISK_geno),snp]=2
+  genotypes[which(genotypes[, snp] == ALT_geno),snp]=0
+  genotypes[which(genotypes[, snp] == HET1_geno),snp]=1
+  genotypes[which(genotypes[, snp] == HET2_geno),snp]=1
+}
+
+
+genotypes[,snplist] %<>% lapply(function(x) as.numeric(as.character(x)))  
+for(snp in snplist){
+  genotypes[,snp]<-genotypes[,snp]*log(TAMA$effect_used[which(TAMA$SNP==snp)])
+}
+
+genotypes$sum<-rowSums(genotypes[2:ncol(genotypes)], na.rm = T)
+genotypes$nacount<-apply(genotypes[2:(ncol(genotypes)-1)], 1, function(x) sum(is.na(x)))
+
+genotypes$GRS<-(genotypes$sum/(17-genotypes$nacount))*(17)
+genotypes<-genotypes[which(genotypes$sum>0),]
+write.table(genotypes[,c("id","GRS")], "/Volumes/biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/PRS/UKBB_TAMA_FEMALE_log_grs_17_for_pheWAS.txt", row.names = F, quote = F, na="", sep="\t")
+
+```
+
+```{r,eval=T}
+goutprs<-read.delim("/Volumes/biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/PRS/UKBB_TAMA_FEMALE_log_grs_17_for_pheWAS.txt")
+colnames(goutprs)<-c("f_eid","GoutPRS")
+pheno2<-pheno2[,c("f_eid","SEX","YEAR","ETHNICITY","TOWNSEND","SITE","BMI","SMOKER","AGE","plink_goutaff","gout_AFFSTAT","ETHNICCLASS")]
+
+pheno2<-merge(pheno2,goutprs, by.x="f_eid", all.x = T)
+pheno2<-pheno2[is.na(pheno2$GoutPRS)==F,]
+females<-pheno2[which(pheno2$SEX==0),]
+
+from = range(females$GoutPRS, na.rm = T)[1] 
+to = range(females$GoutPRS, na.rm = T)[2]
+by = (to-from)/10
+breaksgout <- seq( from = from, to = to, by = by )
+# bucketing values into bins
+
+females<-females %>% mutate(GoutPRS_bins = cut(females$GoutPRS, breaks=breaksgout, include.lowest=TRUE, right=FALSE))
+
+females$GoutPRS_bins<-sub("0.307,0.558","0.31,0.56",females$GoutPRS_bins)
+females$GoutPRS_bins<-sub("0.558,0.809","0.56,0.81",females$GoutPRS_bins)
+females$GoutPRS_bins<-sub("0.809,1.06","0.81,1.06",females$GoutPRS_bins)  
+
+females$GoutPRS_bins2<-females$GoutPRS_bins
+females$GoutPRS_bins2[which(females$GoutPRS_bins2=="[0.31,0.56)")]=NA
+
+sumfilegout_females<-as.data.frame(table(females$GoutPRS_bins))
+sumfilegout_females$controls<-table(females$GoutPRS_bins, females$gout_AFFSTAT)[1:10]
+sumfilegout_females$gout<-table(females$GoutPRS_bins, females$gout_AFFSTAT)[11:20]
+sumfilegout_females$prevalencegout<- round(x = (sumfilegout_females$gout/sumfilegout_females$Freq)*100, digits = 3)
+
+f<-ggplot(sumfilegout_females, aes(Var1,Freq))+geom_col(color="black", alpha=1, fill=gwas_palette[3])+theme_light(base_size = 12)+
+  xlab("Polygenic Risk Score (bins)")+ylab("Count")+
+  theme( axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20)))
+f
+
+a<-sumfilegout_females %>% mutate(Var1_number = as.numeric(Var1)) %>% ggplot( aes(Var1_number,prevalencegout))+geom_line()+theme_light(base_size = 12)+
+  xlab("Polygenic Risk Score (bins)")+ylab("Gout Prevalence (%)")+
+  theme( axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20))) +    scale_x_continuous(labels = as.character(sumfilegout_females$Var1), breaks = 1:nlevels(sumfilegout_females$Var1))
+a
+
+sumfilegout_females %>%  datatable(., caption = "GoutPRS bins and gout prevalence in females", escape = F, options = list(pageLength = 30, autoWidth = TRUE) , rownames = F)
+
+resulttable_females <- as.data.frame(matrix(ncol=6, nrow=0))
+colnames(resulttable_females)<-c("name","OR","LCI","UCI", "P","N" )
+females$GoutPRS_bins2<-factor(females$GoutPRS_bins2, levels =c("[1.56,1.81)","[0.56,0.81)", "[0.81,1.06)", "[1.06,1.31)", "[1.31,1.56)",  "[1.81,2.06)", "[2.06,2.31)", "[2.31,2.57)", "[2.57,2.82]"))
+test<-glm(females$gout_AFFSTAT ~ females$GoutPRS_bins2 + females$AGE, data=females, family = 'binomial') 
+
+for(b in seq(1:9)){
+    resulttable_females[b,]<-results(test=test,i=b)
+}
+
+#replace intercept info with reference bin data
+resulttable_females[1,]<-c("[1.56,1.81)","1","1","1",NA,NA)
+#insert nice names
+resulttable_females[,1]<-c("[1.56,1.81)","[0.56,0.81)", "[0.81,1.06)", "[1.06,1.31)", "[1.31,1.56)",  "[1.81,2.06)", "[2.06,2.31)", "[2.31,2.57)", "[2.57,2.82]" )
+
+resulttable_females[,numcols] %<>% lapply(function(x) as.numeric(as.character(x)))  
+
+resulttable_females$sig<-NA
+resulttable_females$sig[which(resulttable_females$P<0.05)]="*"
+resulttable_females$sig[which(resulttable_females$P<0.01)]="**"
+resulttable_females$sig[which(resulttable_females$P<0.001)]="***"
+
+resulttable_females$name <- factor(resulttable_females$name, levels  = c("[0.56,0.81)", "[0.81,1.06)", "[1.06,1.31)", "[1.31,1.56)","[1.56,1.81)","[1.81,2.06)", "[2.06,2.31)", "[2.31,2.57)", "[2.57,2.82]"))
+resulttable_females$labelpos<-ifelse(resulttable_females$OR < 1, resulttable_females$LCI, resulttable_females$UCI)
+
+
+ggplot(data=resulttable_females, aes(x=name, y=OR)) + theme_light(base_size = 12)+
+  geom_bar(stat="identity", color="black", alpha=1, fill= gwas_palette[3]) +
+  labs( y= "Odds Ratio", x = "Polygenic Risk Score (bins)") +
+  theme( axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20))) + 
+  scale_y_log10(limits = c(0.01,100)) + 
+  geom_errorbar(aes(ymin=LCI, ymax=UCI), width=.2, position=position_dodge(.9)) +
+  geom_text_repel(aes(x=name, y=labelpos, label = sig), na.rm = T, nudge_y = ifelse(resulttable_females$labelpos <=1, -0.09, +0.01))
+
+
+
+resulttable_females %>%  datatable(., caption = "Logisitic regression Gout ~ GRS bins in females ", escape = F, options = list(pageLength = 30, autoWidth = TRUE) , rownames = F)
+
+write.table(sumfilegout_females,"/Volumes/biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/PRS/TAMA_femaleGRS_summary_table.txt", quote = F, sep="\t", na="", row.names = F)
+write.table(resulttable_females,"/Volumes/biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/PRS/TAMA_femaleGRS_results_table.txt", quote = F, sep="\t", na="", row.names = F)
+
+
+
+test_dataset<-females[,c("f_eid","SEX","AGE","GoutPRS","gout_AFFSTAT")]
+test_dataset<-na.omit(test_dataset)
+colnames(test_dataset)[5]="affstat"
+
+#full unadjusted
+full_roc<-roc(affstat ~ GoutPRS, data=test_dataset)   #Compute AUC for predicting case with the variable age
+ggroc(full_roc)+theme_light(base_size = 12)
+
+#full adjusted
+mod1<-glm(affstat ~ GoutPRS+ AGE, data=test_dataset, family="binomial")  #Logistic regression model
+full_roc_adj<-roc(affstat  ~ predict(mod1), data=test_dataset)  #Compute AUC for predicting case with your model
+ggroc(list(full_roc,full_roc_adj))+theme_light(base_size = 12)
+
+#age and sex
+mod1<-glm(affstat ~ AGE, data=test_dataset, family="binomial")  #Logistic regression model
+a_s_roc<-roc(affstat  ~ predict(mod1), data=test_dataset)  #Compute AUC for predicting case with your model
+
+roclist <- list("Female PRS" = full_roc,
+                "Demographic" = a_s_roc,
+                "Combined" = full_roc_adj)
+
+ggroc_female_PRS<-ggroc(roclist)+
+  theme_light(base_size = 12)+
+  scale_colour_manual(values = c("#7ACCD7", "#B865A1","#7C6C65"))+
+  theme(legend.position="bottom")+
+  labs(x = "Specificity", y = "Sensitivity", colour="AUROC model")
+ggroc_female_PRS
+
+
+write.table(ggroc_female_PRS[["data"]],"/Volumes/biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/PRS/TAMA_femaleGRS_ROC.txt", quote = F, sep="\t", na="", row.names = F)
+```

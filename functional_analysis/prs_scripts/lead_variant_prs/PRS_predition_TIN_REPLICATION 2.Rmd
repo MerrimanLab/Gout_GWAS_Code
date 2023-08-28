@@ -1,0 +1,336 @@
+---
+title: "PRS prediction Tin et al"
+author: "Ruth Topless"
+date: "`r format(Sys.Date())`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F)
+library(DT)
+
+library(tidyverse)
+library(magrittr)
+numcols = c("OR","LCI","UCI", "P","N")
+library(ggplot2)
+library(ggrepel)
+library(ggh4x)
+library(gridExtra)
+
+```
+
+Questions:
+Which Gout affection status do I use? visit 0
+What age do I adjust by? age at visit 0
+
+Effect sizes all converted to risk  
+Male and Female analaysis uses the effect sizes from the combined GWAS to weight the SNPs. not sex specific weighting. 
+
+
+114 SNPs
+
+```{r}
+#GRS pheWAS in ukbiobank
+
+
+pheno<-read.delim("/Volumes/biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/UKBioBank/Phenotypes/data/inital_pheno_visit0_decoded.txt", stringsAsFactors = F)
+pheno2<-pheno %>% select(f_eid, f_31_0_0, f_34_0_0,f_21000_0_0, f_189_0_0, f_54_0_0, f_21001_0_0, f_20116_0_0, f_21003_0_0)
+colnames(pheno2)<-c("f_eid", "SEX", "YEAR","ETHNICITY", "TOWNSEND", "SITE", "BMI", "SMOKER", "AGE")
+urate<-read.delim("/Volumes/biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/UKBioBank/Phenotypes/data/ukb_urate_umolL_v0.txt", stringsAsFactors = F)
+colnames(urate)<-c("f_eid", "URATE")
+pheno2<-merge(pheno2, urate, by="f_eid", all.x= T)
+
+affstat<-read.delim("/Volumes/archive/merrimanlab/raid_backup/UKbiobank/genetic_files/gout_gwas_covar.20210201.covar")
+pheno2<-merge(pheno2,affstat[,c("IID","plink_goutaff")], by.x="f_eid",by.y="IID")
+pheno2$gout_AFFSTAT=NA
+pheno2$gout_AFFSTAT[which(pheno2$plink_goutaff==2)]=1
+pheno2$gout_AFFSTAT[which(pheno2$plink_goutaff==1)]=0
+pheno2<-pheno2[is.na(pheno2$gout_AFFSTAT)==F,]
+
+
+goutprs<-read.delim("/Volumes/biochemistry/Lab_Groups/merrimanlab/Merriman_Documents/Ruth/2021_projects/post_GWAS_analysis/PRS/UKBB_tin114_grs_2021_for_PRS.txt")
+colnames(goutprs)<-c("f_eid","GoutPRS")
+pheno2<-merge(pheno2,goutprs, by="f_eid", all.x = T)
+
+pheno2$ETHNICCLASS<-pheno2$ETHNICITY
+pheno2$ETHNICCLASS <- plyr::mapvalues(pheno2$ETHNICCLASS, from = c("African","White and Black African", "Black or Black British","Caribbean", "Any other Black background","White and Black Caribbean", "Asian or Asian British","Chinese","Indian","Pakistani","White and Asian","Any other Asian background", "Bangladeshi", "British","Any other white background", "Irish","White", "Prefer not to answer","Any other mixed background","Do not know","Mixed","Other ethnic group"), to = c("BLACK","BLACK","BLACK","BLACK","BLACK","BLACK","ASIAN","ASIAN","ASIAN","ASIAN","ASIAN","ASIAN","ASIAN","WHITE", "WHITE","WHITE","WHITE", "OTHER","OTHER","OTHER","OTHER","OTHER"))
+pheno2<-pheno2[which(pheno2$ETHNICCLASS=="WHITE"),]
+pheno2<-pheno2[is.na(pheno2$GoutPRS)==F,]
+
+from = range(pheno2$GoutPRS, na.rm = T)[1] 
+to = range(pheno2$GoutPRS, na.rm = T)[2] 
+by = (to-from)/10
+breaksgout <- seq( from = from, to = to, by = by )
+# bucketing values into bins
+pheno2<-pheno2 %>% mutate(GoutPRS_bins = cut(pheno2$GoutPRS, breaks=breaksgout, include.lowest=TRUE, right=FALSE))
+
+```
+
+## Part A Gout PRS bins
+
+```{r}
+
+sumfilegout<-as.data.frame(table(pheno2$GoutPRS_bins))
+sumfilegout$controls<-table(pheno2$GoutPRS_bins, pheno2$gout_AFFSTAT)[1:10]
+sumfilegout$gout<-table(pheno2$GoutPRS_bins, pheno2$gout_AFFSTAT)[11:20]
+sumfilegout$prevalencegout<- round(x = (sumfilegout$gout/sumfilegout$Freq)*100, digits = 3)
+
+sumfilegout %>%  datatable(., caption = "GoutPRS bins and gout prevalence", escape = F, options = list(pageLength = 30, autoWidth = TRUE) , rownames = F)
+
+f<-ggplot(sumfilegout, aes(Var1,Freq))+geom_col()+
+  xlab("Gout risk score bin")+
+  theme(plot.title = element_text(size=14, face="bold", hjust = 0.5), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20)))
+f
+a<-sumfilegout %>% mutate(Var1_number = as.numeric(Var1)) %>% ggplot( aes(Var1_number,prevalencegout))+geom_line()+
+  xlab("Gout risk score bin")+
+  theme(plot.title = element_text(size=14, face="bold", hjust = 0.5), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20))) + scale_x_continuous(labels = as.character(sumfilegout$Var1), breaks = 1:nlevels(sumfilegout$Var1))
+a
+```
+
+
+## Part B Gout PRS bins
+```{r}
+results= function(test, i=2){
+  matrixoutput = matrix(nrow=1, ncol=6)
+  matrixoutput[1] <- names(coefficients(test)[i])
+  matrixoutput[2] <- as.numeric(exp(coefficients(test))[i]) #OR
+  matrixoutput[3] <- as.numeric(exp(coef(summary(test))[i, 1] - 1.96 * coef(summary(test))[i, 2])) #LCI
+  matrixoutput[4] <- as.numeric(exp(coef(summary(test))[i, 1] + 1.96 * coef(summary(test))[i, 2])) #UCI
+  matrixoutput[5] <- as.numeric(coef(summary(test))[i,c(4)]) #p value
+  matrixoutput[6] <- test$df.null+1
+  return ((matrixoutput))
+}
+
+pheno2$GoutPRS_bins[which(pheno2$GoutPRS_bins=="[3.56,3.85)")]=NA
+pheno2$GoutPRS_bins<-sub("4.71,5" ,"4.71,5.00",pheno2$GoutPRS_bins)
+pheno2$GoutPRS_bins<-sub("5,5.29","5.00,5.29",pheno2$GoutPRS_bins)
+
+resulttable <- as.data.frame(matrix(ncol=6, nrow=0))
+colnames(resulttable)<-c("name","OR","LCI","UCI", "P","N" )
+pheno2$GoutPRS_bins<-factor(pheno2$GoutPRS_bins, levels =c("[4.71,5.00)","[3.85,4.14)", "[4.14,4.42)", "[4.42,4.71)", "[5.00,5.29)", "[5.29,5.58)", "[5.58,5.87)", "[5.87,6.16)", "[6.16,6.45]"  ))
+test<-glm(gout_AFFSTAT~GoutPRS_bins+AGE+SEX, data=pheno2, family = 'binomial') 
+
+for(b in seq(2:12)){
+    resulttable[b,]<-results(test=test,i=b)
+}
+resulttable[1,]<-c("[4.71,5.00)","1","1","1",NA, NA)
+resulttable[,1]<-c("[4.71,5.00)", "[3.85,4.14)", "[4.14,4.42)", "[4.42,4.71)", "[5.00,5.29)", "[5.29,5.58)", "[5.58,5.87)", "[5.87,6.16)", "[6.16,6.45]" ,  "Age", "Sex")
+
+
+resulttable[,numcols] %<>% lapply(function(x) as.numeric(as.character(x)))
+resulttable$sig<-NA
+resulttable$sig[which(resulttable$P<0.05)]="*"
+resulttable$sig[which(resulttable$P<0.01)]="**"
+resulttable$sig[which(resulttable$P<0.001)]="***"
+
+resulttable$name <- factor(resulttable$name, levels = c("[3.85,4.14)", "[4.14,4.42)", "[4.42,4.71)", "[4.71,5.00)", "[5.00,5.29)", "[5.29,5.58)", "[5.58,5.87)", "[5.87,6.16)", "[6.16,6.45]", "Age", "Sex"))
+resulttable$labelpos<-ifelse(resulttable$OR <= 1, resulttable$LCI, resulttable$UCI)
+
+
+
+ggplot(data=resulttable, aes(x=name, y=OR)) + theme_light(base_size = 12)+
+  geom_bar(stat="identity", color="black", fill= "#115896", alpha=1) +
+  labs( y= "Odds Ratio", x = "Polygenic Risk Score (bins)") +
+  theme( axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20))) + 
+  scale_y_log10(limits=c(0.1,50)) + 
+  geom_errorbar(aes(ymin=LCI, ymax=UCI), width=.2, position=position_dodge(.9)) +
+  geom_text_repel(aes(x=name, y=labelpos, label = sig), na.rm = T, nudge_y = ifelse(resulttable$labelpos <=1, -0.09, +0.01))
+
+
+
+resulttable %>%  datatable(., caption = "Logisitic regression Gout ~ GRS bins ", escape = F, options = list(pageLength = 30, autoWidth = TRUE) , rownames = F)
+
+
+```
+
+
+##  AUROC
+
+```{r}
+
+
+library(pROC)
+
+test_dataset<-pheno2[,c("f_eid","SEX","AGE","GoutPRS","gout_AFFSTAT")]
+test_dataset<-na.omit(test_dataset)
+colnames(test_dataset)[5]="affstat"
+
+#full unadjusted
+auc(affstat ~ GoutPRS, data=test_dataset)   #Compute AUC for predicting case with the variable age
+#full adjusted
+mod1<-glm(affstat ~ GoutPRS+ AGE+as.factor(SEX), data=test_dataset, family="binomial")  #Logistic regression model
+auc(affstat  ~ predict(mod1), data=test_dataset)  #Compute AUC for predicting case with your model
+
+#age and sex
+mod1<-glm(affstat ~ AGE+as.factor(SEX), data=test_dataset, family="binomial")  #Logistic regression model
+auc(affstat  ~ predict(mod1), data=test_dataset)  #Compute AUC for predicting case with your model
+
+#males
+test_dataset_males<-test_dataset[which(test_dataset$SEX==1),]
+auc(affstat ~ GoutPRS, data=test_dataset_males)   #Compute AUC for predicting case with the variable age
+#full adjusted
+mod1<-glm(affstat ~ GoutPRS+ AGE, data=test_dataset_males, family="binomial")  #Logistic regression model
+auc(affstat  ~ predict(mod1), data=test_dataset_males)  #Compute AUC for predicting case with your model
+
+
+#females
+test_dataset_females<-test_dataset[which(test_dataset$SEX==0),]
+auc(affstat ~ GoutPRS, data=test_dataset_females)   #Compute AUC for predicting case with the variable age
+#full adjusted
+mod1<-glm(affstat ~ GoutPRS+ AGE, data=test_dataset_females, family="binomial")  #Logistic regression model
+auc(affstat  ~ predict(mod1), data=test_dataset_females)  #Compute AUC for predicting case with your model
+
+
+
+```
+
+# males
+
+```{r, eval=FALSE}
+pheno2<-pheno2 %>% mutate(GoutPRS_bins = cut(pheno2$GoutPRS, breaks=breaksgout, include.lowest=TRUE, right=FALSE))
+males<-pheno2[which(pheno2$SEX==1),]
+
+
+sumfilegout_males<-as.data.frame(table(males$GoutPRS_bins))
+sumfilegout_males$controls<-table(males$GoutPRS_bins, males$gout_AFFSTAT)[1:10]
+sumfilegout_males$gout<-table(males$GoutPRS_bins, males$gout_AFFSTAT)[11:20]
+sumfilegout_males$prevalencegout<- round(x = (sumfilegout_males$gout/sumfilegout_males$Freq)*100, digits = 3)
+
+f<-ggplot(sumfilegout_males, aes(Var1,Freq))+geom_col()+
+  xlab("Gout risk score bin")+
+  theme(plot.title = element_text(size=14, face="bold", hjust = 0.5), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20)))
+f
+a<-sumfilegout_males %>% mutate(Var1_number = as.numeric(Var1)) %>% ggplot( aes(Var1_number,prevalencegout))+geom_line()+
+  xlab("Gout risk score bin")+
+  theme(plot.title = element_text(size=14, face="bold", hjust = 0.5), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20))) + scale_x_continuous(labels = as.character(sumfilegout$Var1), breaks = 1:nlevels(sumfilegout$Var1))
+a
+
+sumfilegout_males %>%  datatable(., caption = "GoutPRS bins and gout prevalence in males", escape = F, options = list(pageLength = 30, autoWidth = TRUE) , rownames = F)
+
+males$GoutPRS_bins[which(males$GoutPRS_bins=="[3.56,3.85)")]=NA
+males$GoutPRS_bins<-sub("4.71,5" ,"4.71,5.00",males$GoutPRS_bins)
+males$GoutPRS_bins<-sub("5,5.29","5.00,5.29",males$GoutPRS_bins)
+
+resulttable_males <- as.data.frame(matrix(ncol=6, nrow=0))
+colnames(resulttable_males)<-c("name","OR","LCI","UCI", "P","N" )
+males$GoutPRS_bins<-factor(males$GoutPRS_bins, levels =c("[4.71,5.00)","[3.85,4.14)", "[4.14,4.42)", "[4.42,4.71)", "[5.00,5.29)", "[5.29,5.58)", "[5.58,5.87)", "[5.87,6.16)", "[6.16,6.45]" ))
+test<-glm(gout_AFFSTAT~GoutPRS_bins+AGE,data=males) 
+
+for(b in seq(1:10)){
+    resulttable_males[b,]<-results(test=test,i=b)
+}
+resulttable_males[1,]<-c("[4.71,5.00)","1","1","1",NA, NA)
+resulttable_males[,1]<-c("[4.71,5.00)","[3.85,4.14)", "[4.14,4.42)", "[4.42,4.71)", "[5.00,5.29)", "[5.29,5.58)", "[5.58,5.87)", "[5.87,6.16)", "[6.16,6.45]", "Age")
+resulttable_males$OR<-as.numeric(resulttable_males$OR)
+resulttable_males$UCI<-as.numeric(resulttable_males$UCI)
+resulttable_males$LCI<-as.numeric(resulttable_males$LCI)
+resulttable_males$P<-as.numeric(resulttable_males$P)
+
+resulttable_males$sig<-NA
+resulttable_males$sig[which(resulttable_males$P<0.05)]="*"
+resulttable_males$sig[which(resulttable_males$P<0.01)]="**"
+resulttable_males$sig[which(resulttable_males$P<0.001)]="***"
+
+resulttable_males$name <- factor(resulttable_males$name, levels = c("[3.85,4.14)", "[4.14,4.42)", "[4.42,4.71)","[4.71,5.00)", "[5.00,5.29)", "[5.29,5.58)", "[5.58,5.87)", "[5.87,6.16)", "[6.16,6.45]", "Age"))
+
+library(ggrepel)
+ggplot(data=resulttable_males, aes(x=name, y=OR)) +
+  geom_bar(stat="identity", color="black") +
+  labs(title = "Males", y= "Odds Ratio (Log scale)", x = "Risk Factor") +
+  theme(plot.title = element_text(size=14, face="bold", hjust = 0.5), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20))) + 
+  scale_y_log10() + 
+  geom_errorbar(aes(ymin=LCI, ymax=UCI), width=.2, position=position_dodge(.9)) +
+  geom_text_repel(label = resulttable_males$sig, nudge_y = 0.015, aes(segment.alpha=0))
+
+#fix significance
+#library(svglite)
+#ggsave("~/Desktop/GoutCohort_barchart.svg")
+
+resulttable_males %>%  datatable(., caption = "Logisitic regression Gout ~ GRS bins in males ", escape = F, options = list(pageLength = 30, autoWidth = TRUE) , rownames = F)
+
+
+test_dataset_males<-test_dataset[which(test_dataset$SEX==1),]
+
+
+pROC::roc(response = test_dataset_males$affstat, test_dataset_males$GoutPRS, plot=TRUE, legacy.axes=TRUE, percent=TRUE, xlab="False Positive Percentage", ylab="True Postive Percentage")
+
+
+```
+
+# females
+
+```{r eval=FALSE}
+females<-pheno2[which(pheno2$SEX==0),]
+# breaksgout2 <- seq(from = range(females$GoutPRS, na.rm = T)[1], to = range(females$GoutPRS, na.rm = T)[2], by = (abs(range(females$GoutPRS, na.rm = T)[1]) + range(females$GoutPRS, na.rm = T)[2])/10)
+# bucketing values into bins
+# females<-females %>% mutate(GoutPRS_bins = cut(females$GoutPRS, breaks=breaksgout2, include.lowest=TRUE, right=FALSE))
+females$GoutPRS_bins<-as.character(females$GoutPRS_bins)
+
+females$GoutPRS_bins[which(females$GoutPRS_bins=="[3.56,3.85)"|females$GoutPRS_bins=="[3.85,4.14)")]="[3.56,4.14)"
+females$GoutPRS_bins[which(females$GoutPRS_bins=="[5.9,6.2)"|females$GoutPRS_bins=="[6.2,6.49]")]="[5.9,6.2)"
+
+females$GoutPRS_bins<-as.factor(females$GoutPRS_bins)
+females$GoutPRS_bins<-factor(females$GoutPRS_bins, levels = c("[3.56,4.14)", "[4.14,4.44)", "[4.44,4.73)", "[4.73,5.02)", "[5.02,5.32)", "[5.32,5.61)",  "[5.61,5.9)",   "[5.9,6.2)"))
+
+sumfilegout_females<-as.data.frame(table(females$GoutPRS_bins))
+sumfilegout_females$controls<-table(females$GoutPRS_bins, females$gout_AFFSTAT)[1:8]
+sumfilegout_females$gout<-table(females$GoutPRS_bins, females$gout_AFFSTAT)[9:16]
+sumfilegout_females$prevalencegout<- round(x = (sumfilegout_females$gout/sumfilegout_females$Freq)*100, digits = 3)
+
+f<-ggplot(sumfilegout_females, aes(Var1,Freq))+geom_col()+
+  xlab("Gout risk score bin")+
+  theme(plot.title = element_text(size=14, face="bold", hjust = 0.5), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20)))
+f
+a<-sumfilegout_males %>% mutate(Var1_number = as.numeric(Var1)) %>% ggplot( aes(Var1_number,prevalencegout))+geom_line()+
+  xlab("Gout risk score bin")+
+  theme(plot.title = element_text(size=14, face="bold", hjust = 0.5), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20))) + scale_x_continuous(labels = as.character(sumfilegout$Var1), breaks = 1:nlevels(sumfilegout$Var1))
+a
+
+sumfilegout_females %>%  datatable(., caption = "GoutPRS bins and gout prevalence in females", escape = F, options = list(pageLength = 30, autoWidth = TRUE) , rownames = F)
+
+resulttable_females <- as.data.frame(matrix(ncol=6, nrow=0))
+colnames(resulttable_females)<-c("name","OR","LCI","UCI", "P","N" )
+females$GoutPRS_bins<-factor(females$GoutPRS_bins, levels =c("[4.73,5.02)","[3.56,4.14)", "[4.14,4.44)", "[4.44,4.73)",  "[5.02,5.32)", "[5.32,5.61)",  "[5.61,5.9)",   "[5.9,6.2)" ))
+test<-glm(gout_AFFSTAT~GoutPRS_bins+AGE,data=females) 
+
+for(b in seq(1:9)){
+    resulttable_females[b,]<-results(test=test,i=b)
+}
+resulttable_females[1,]<-c("GoutPRS_bins[4.73,5.02)","1","1","1",NA, NA)
+resulttable_females[,1]<-c("[4.73,5.02)", "[3.56,4.14)", "[4.14,4.44)", "[4.44,4.73)", "[5.02,5.32)", "[5.32,5.61)",  "[5.61,5.9)",   "[5.9,6.2)", "Age")
+resulttable_females$OR<-as.numeric(resulttable_females$OR)
+resulttable_females$UCI<-as.numeric(resulttable_females$UCI)
+resulttable_females$LCI<-as.numeric(resulttable_females$LCI)
+resulttable_females$P<-as.numeric(resulttable_females$P)
+
+resulttable_females$sig<-NA
+resulttable_females$sig[which(resulttable_females$P<0.05)]="*"
+resulttable_females$sig[which(resulttable_females$P<0.01)]="**"
+resulttable_females$sig[which(resulttable_females$P<0.001)]="***"
+
+resulttable_females$name <- factor(resulttable_females$name, levels = c("[3.56,4.14)", "[4.14,4.44)", "[4.44,4.73)", "[4.73,5.02)", "[5.02,5.32)", "[5.32,5.61)",  "[5.61,5.9)",   "[5.9,6.2)", "Age"))
+
+library(ggrepel)
+ggplot(data=resulttable_females, aes(x=name, y=OR)) +
+  geom_bar(stat="identity", color="black") +
+  labs(title = "Females", y= "Odds Ratio (Log scale)", x = "Risk Factor") +
+  theme(plot.title = element_text(size=14, face="bold", hjust = 0.5), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none", axis.title.x = element_text(margin = margin(t = 20))) + 
+  scale_y_log10() + 
+  geom_errorbar(aes(ymin=LCI, ymax=UCI), width=.2, position=position_dodge(.9)) +
+  geom_text_repel(label = resulttable_females$sig, nudge_y = 0.001, aes(segment.alpha=0))
+
+#fix significance
+#library(svglite)
+#ggsave("~/Desktop/GoutCohort_barchart.svg")
+
+resulttable_females %>%  datatable(., caption = "Logisitic regression Gout ~ GRS bins in females ", escape = F, options = list(pageLength = 30, autoWidth = TRUE) , rownames = F)
+
+
+
+test_dataset_females<-test_dataset[which(test_dataset$SEX==0),]
+
+
+pROC::roc(response = test_dataset_females$affstat, test_dataset_females$GoutPRS, plot=TRUE, legacy.axes=TRUE, percent=TRUE, xlab="False Positive Percentage", ylab="True Postive Percentage")
+```
+
+

@@ -1,0 +1,33 @@
+################################################################################
+
+# This directory contains the scripts for lead variant-based PRS and PRSice-2
+# PRS methods
+
+################################################################################
+
+# R markdown documents for the lead variant-based PRS analyses are in the
+# `lead_variant_prs/` directory (written and analysed by Ruth Topless)
+
+################################################################################
+# Scripts and R markdown document of the PRSice-2 method are in the
+# `prsice_prs/` directory.
+#
+# Generating the PRS using PRSice-2 was done by Riku Takei and analyses using
+# the PRS was done by Nick Sumpter, based on Ruth's code
+
+# Script to get a list of all the variants in the GWAS sumary stats, which is
+# then used to pull out relevant variants from the UKBB
+bash get_summary_var.sh
+
+# Script to pull out the variants present in GWAS:
+bash parallel_ukbb_var.sh
+
+# Script to add the gout phenotype to the fam file (to be used for PRSice-2):
+bash make_fam.sh
+
+# Run PRSice-2 with the gout GWAS summary stats and the UKBB genotype:
+bash run_prsice.sh
+
+# Analyse the PRSice-2 output:
+PRS_revised_code.Rmd
+
