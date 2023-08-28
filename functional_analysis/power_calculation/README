@@ -1,0 +1,13 @@
+################################################################################
+
+# This directory contains the script for estimating gout effect based on urate
+# effect, and then calculating power
+
+################################################################################
+
+# Script for calculating the power for the variants showing pleiotropic
+# effects. The regression line used to estimate the gout effect size based on
+# urate effect size was based on the PPH4 >= 0.8 variants, as these variants
+# most likely have a proportional urate and gout effect.
+Rscript power_calc.R
+
