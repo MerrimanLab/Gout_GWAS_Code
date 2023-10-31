@@ -209,20 +209,15 @@ gene_map = map2(gene_map, contain_lead, ~ .x %>% mutate(contain_lead = .y))
 gene_map = map(gene_map, ~ .x %>% mutate(has_lead_or_tss = closest_tss | contain_lead))
 
 ################################################################################
-# Get genes with evidence of regulation/connection by ABC-enhancers:
+# Get genes with evidence of regulation/connection by ABC-enhancers in
+# stimulated immune cells:
 
-eqtl_abc = read.table('/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/abc/abc_eqtl_overlap.14JUL2023.eqtl_gene_match.txt', sep = '\t', header = T, stringsAsFactors = F)
-eqtl_abc = left_join(eqtl_abc, loci_cohort)
+abc_stim = read.table('/Volumes/archive/merrimanlab/major_gwas_paper_archive/abc/abc_eqtl_overlap.14JUL2023.clean.stimulated.txt', sep = '\t', header = T, stringsAsFactors = F)
+abc_stim = left_join(abc_stim, loci_cohort)
 
-nc_abc = read.table('/Volumes/archive/merrimanlab/major_gwas_paper_archive/results_for_paper/misc//non_coding_abc.txt', sep = '\t', header = T, stringsAsFactors = F)
-nc_abc = nc_abc %>% separate_rows(cohort, sep = '/') %>% distinct
+abc_stim = map(c('full', 'male', 'female'), ~ abc_stim %>% filter(cohort == .x) %>% select(TargetGene) %>% mutate(is_abc_target = T) %>% distinct)
 
-eqtl_abc = map(c('full', 'male', 'female'), ~ eqtl_abc %>% filter(cohort == .x) %>% select(TargetGene) %>% mutate(is_abc_target = T))
-nc_abc = map(c('full', 'male', 'female'), ~ nc_abc %>% filter(cohort == .x) %>% select(TargetGene) %>% mutate(is_abc_target = T))
-
-abc_list = map2(eqtl_abc, nc_abc, ~ rbind(.x, .y) %>% distinct)
-
-gene_map = map2(gene_map, abc_list, ~ left_join(.x, .y, by = c('gene' = 'TargetGene')))
+gene_map = map2(gene_map, abc_stim, ~ left_join(.x, .y, by = c('gene' = 'TargetGene')))
 gene_map = map(gene_map, ~ .x %>% mutate(is_abc_target = ifelse(is.na(is_abc_target), F, is_abc_target)))
 
 ################################################################################
