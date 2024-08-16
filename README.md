@@ -6,6 +6,12 @@ analyses that used the meta-analysis results.
 Contain all scripts relevant to the QC, single-ancestry and trans-ancestry
 meta-analysis.
 
+Summary statistics for AFR, EAS, EUR, LAT, and TAMA are available on GWAS
+catalog with the accession IDs GCST90428594-GCST90428605.
+
+Note that these summary statistics do not include the 23andMe data due to prior
+data use agreement with 23andMe.
+
 Refer to the relevant README files in the directory.
 
 ## Functional analysis scripts
