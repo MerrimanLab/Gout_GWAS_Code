@@ -1,4 +1,6 @@
 # Gout_GWAS_Code
+[![DOI](https://zenodo.org/badge/641473683.svg)](https://zenodo.org/doi/10.5281/zenodo.13350994)
+
 Repository for all the codes written for gout GWAS meta-analysis and all other
 analyses that used the meta-analysis results.
 
